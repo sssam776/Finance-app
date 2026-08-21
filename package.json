@@ -1,0 +1,42 @@
+{
+  "name": "ramwall-finance-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx db/migrate.ts",
+    "db:seed": "tsx db/seed.ts"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "drizzle-orm": "^0.38.3",
+    "better-sqlite3": "^11.7.0",
+    "xero-node": "^11.1.0",
+    "decimal.js": "^10.4.3",
+    "csv-parse": "^5.6.0",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
+    "nanoid": "^5.0.9",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@types/better-sqlite3": "^7.6.12",
+    "typescript": "^5.7.2",
+    "drizzle-kit": "^0.30.1",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.4.49",
+    "autoprefixer": "^10.4.20"
+  }
+}
