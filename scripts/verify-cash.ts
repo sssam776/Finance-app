@@ -14,7 +14,7 @@
  * actually be looked at.
  */
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   entities,
@@ -80,6 +80,50 @@ async function cashRow(bankAccountId: string): Promise<CashRow | undefined> {
   return body.accounts.find((a) => a.bankAccountId === bankAccountId);
 }
 
+/**
+ * Removes anything a previous --keep run left behind. Without this the second
+ * run sees a variance where it expects none, and re-inserting the simulated
+ * Xero account trips the unique index on (entity_id, xero_account_id).
+ */
+function clearPreviousRun(entityId: string) {
+  const stale = db
+    .select()
+    .from(xeroAccounts)
+    .where(and(eq(xeroAccounts.entityId, entityId), eq(xeroAccounts.xeroAppId, "verify-app")))
+    .all();
+
+  for (const row of stale) {
+    db.delete(xeroAccounts).where(eq(xeroAccounts.id, row.id)).run();
+    if (row.syncRunId) db.delete(syncRuns).where(eq(syncRuns.id, row.syncRunId)).run();
+  }
+
+  const accounts = db
+    .select()
+    .from(entityBankAccounts)
+    .where(eq(entityBankAccounts.entityId, entityId))
+    .all()
+    .filter((a) => a.accountNumber.startsWith("verify-"));
+
+  for (const account of accounts) {
+    const snapshots = db
+      .select()
+      .from(bankBalanceSnapshots)
+      .where(eq(bankBalanceSnapshots.entityBankAccountId, account.id))
+      .all();
+    for (const snapshot of snapshots) {
+      db.delete(bankBalanceSnapshots).where(eq(bankBalanceSnapshots.id, snapshot.id)).run();
+      db.delete(bankImports).where(eq(bankImports.id, snapshot.bankImportId)).run();
+    }
+    db.delete(entityBankAccounts).where(eq(entityBankAccounts.id, account.id)).run();
+  }
+
+  db.delete(varianceThresholds).where(eq(varianceThresholds.entityId, entityId)).run();
+
+  if (stale.length || accounts.length) {
+    console.log(`      cleared ${stale.length + accounts.length} rows from a previous run`);
+  }
+}
+
 async function main() {
   const login = await call("/api/auth/login", {
     method: "POST",
@@ -92,6 +136,8 @@ async function main() {
   const entity = db.select().from(entities).limit(1).get();
   if (!entity) throw new Error("No entities seeded — run db/seed.ts first");
   console.log(`      using entity ${entity.shortCode}`);
+
+  clearPreviousRun(entity.id);
 
   console.log("\n--- create a mapped bank account ---");
   const created = await call("/api/bank-accounts", {
