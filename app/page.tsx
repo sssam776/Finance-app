@@ -39,7 +39,9 @@ interface CashAccountRow {
   bankBalanceDate: string | null;
   xeroBalance: string | null;
   xeroBalanceDate: string | null;
-  variance: { amount: string; percent: string | null } | null;
+  currency: string;
+  variance: { amount: string; percent: string | null; currency: string } | null;
+  currencyMismatch: boolean;
   threshold: Threshold | null;
   isException: boolean;
   evidence: { bank: BankEvidence | null; xero: XeroEvidence | null };
@@ -49,7 +51,10 @@ interface CashAccountRow {
 
 interface CashPositionResponse {
   accounts: CashAccountRow[];
+  availableCashByCurrency: { currency: string; amount: string }[];
   totalAvailableCash: string;
+  reportingCurrency: string;
+  hasForeignCurrency: boolean;
   oldestSourceDate: string | null;
   exceptionCount: number;
 }
@@ -132,7 +137,21 @@ export default function CashPositionPage() {
           </p>
         </div>
         <div className="text-right">
-          <div className="text-3xl font-semibold">${data.totalAvailableCash}</div>
+          {data.availableCashByCurrency.length === 0 ? (
+            <div className="text-3xl font-semibold">—</div>
+          ) : (
+            data.availableCashByCurrency.map((total) => (
+              <div key={total.currency} className="text-3xl font-semibold tabular-nums">
+                {total.amount}
+                <span className="ml-1.5 text-sm font-normal text-slate-500">{total.currency}</span>
+              </div>
+            ))
+          )}
+          {data.hasForeignCurrency && (
+            <div className="text-xs text-amber-600">
+              Shown per currency. No FX rate source is configured, so these are not added together.
+            </div>
+          )}
           {data.oldestSourceDate && (
             <div className="text-xs text-amber-600">
               Oldest underlying source date: {data.oldestSourceDate}
@@ -257,17 +276,19 @@ function FragmentRow({
           )}
         </td>
         <td className="px-4 py-3 text-right tabular-nums">
-          {row.bankBalance ? `$${row.bankBalance}` : "—"}
+          {row.bankBalance ? `${row.bankBalance} ${row.currency}` : "—"}
         </td>
         <td className="px-4 py-3 text-slate-500">{row.bankBalanceDate ?? "—"}</td>
         <td className="px-4 py-3 text-right tabular-nums">
-          {row.xeroBalance ? `$${row.xeroBalance}` : "not synced"}
+          {row.xeroBalance ? row.xeroBalance : "not synced"}
         </td>
         <td className="px-4 py-3 text-slate-500">{row.xeroBalanceDate ?? "—"}</td>
         <td className="px-4 py-3 text-right tabular-nums">
-          {row.variance ? (
+          {row.currencyMismatch ? (
+            <span className="text-xs text-amber-600">currency mismatch</span>
+          ) : row.variance ? (
             <span className={row.isException ? "font-medium text-red-600" : "text-slate-700"}>
-              ${row.variance.amount}
+              {row.variance.amount} {row.variance.currency}
               {row.variance.percent && <span className="text-xs"> ({row.variance.percent}%)</span>}
               {row.isException && (
                 <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-700">

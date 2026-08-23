@@ -63,18 +63,29 @@ export async function GET() {
         .get();
     }
 
-    let variance: { amount: string; percent: string | null } | null = null;
-    if (latestSnapshot && xeroAccount?.currentBalance) {
+    // A snapshot imported in one currency cannot be compared with a Xero
+    // balance in another. Rather than silently subtracting them, the row
+    // reports why no variance is shown.
+    const currencyMismatch = Boolean(
+      latestSnapshot && latestSnapshot.currency !== account.currency
+    );
+
+    let variance: { amount: string; percent: string | null; currency: string } | null = null;
+    if (latestSnapshot && xeroAccount?.currentBalance && !currencyMismatch) {
       const bankBalance = Money.of(latestSnapshot.closingBalance, latestSnapshot.currency);
       const xeroBalance = Money.of(xeroAccount.currentBalance, latestSnapshot.currency);
       const diff = bankBalance.subtract(xeroBalance);
       const pct = variancePercent(bankBalance, xeroBalance);
-      variance = { amount: diff.toFixedString(2), percent: pct ? pct.toFixed(2) : null };
+      variance = {
+        amount: diff.toFixedString(2),
+        percent: pct ? pct.toFixed(2) : null,
+        currency: latestSnapshot.currency,
+      };
     }
 
     const threshold = resolveThreshold(thresholdRows, entity.id);
     const exception = variance
-      ? isVarianceException(variance.amount, variance.percent, threshold, account.currency)
+      ? isVarianceException(variance.amount, variance.percent, threshold, variance.currency)
       : false;
 
     // CASH-006: the records behind each figure, so a variance can be traced to
@@ -98,12 +109,14 @@ export async function GET() {
       bankAccountId: account.id,
       bankName: account.bankName,
       accountName: account.accountName,
+      currency: account.currency,
       isLoanFacility: account.isLoanFacility,
       bankBalance: latestSnapshot?.closingBalance ?? null,
       bankBalanceDate: latestSnapshot?.balanceDate ?? null,
       xeroBalance: xeroAccount?.currentBalance ?? null,
       xeroBalanceDate: xeroAccount?.balanceAsAt ?? null,
       variance,
+      currencyMismatch,
       threshold,
       isException: exception,
       evidence: {
@@ -135,15 +148,33 @@ export async function GET() {
   }
 
   const availableCashRows = rows.filter((r) => !r.isLoanFacility && r.bankBalance !== null);
-  const totalAvailableCash = availableCashRows.reduce(
-    (acc, r) => acc.add(Money.of(r.bankBalance!, "NZD")),
-    Money.zero("NZD")
-  );
+
+  // Totalled per currency, never summed across them. Adding USD to NZD needs a
+  // dated, approved FX rate, and there is no rate source in this build — so a
+  // single figure would be a made-up number presented as cash on hand.
+  // Money.add() would throw on the mismatch anyway; this reports it instead.
+  const totalsByCurrency = new Map<string, Money>();
+  for (const row of availableCashRows) {
+    const currency = row.currency;
+    const running = totalsByCurrency.get(currency) ?? Money.zero(currency);
+    totalsByCurrency.set(currency, running.add(Money.of(row.bankBalance!, currency)));
+  }
+
+  const availableCashByCurrency = [...totalsByCurrency.entries()]
+    .map(([currency, total]) => ({ currency, amount: total.toFixedString(2) }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+
+  const reportingCurrency = "NZD";
   const oldestAcrossAll = oldestDateOnly(rows.map((r) => r.oldestSourceDate).filter((d): d is string => Boolean(d)));
 
   return NextResponse.json({
     accounts: rows,
-    totalAvailableCash: totalAvailableCash.toFixedString(2),
+    availableCashByCurrency,
+    // Retained for the headline figure, and it is now honestly labelled: it is
+    // the NZD total alone, not a converted group total.
+    totalAvailableCash: totalsByCurrency.get(reportingCurrency)?.toFixedString(2) ?? "0.00",
+    reportingCurrency,
+    hasForeignCurrency: availableCashByCurrency.some((t) => t.currency !== reportingCurrency),
     oldestSourceDate: oldestAcrossAll,
     exceptionCount: rows.filter((r) => r.isException).length,
   });
