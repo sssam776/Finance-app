@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
+import { and, eq, notInArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { xeroOauthStates } from "@/db/schema";
+import { xeroOauthStates, xeroConnections } from "@/db/schema";
 import { resolveXeroApp, buildXeroClient } from "@/lib/xero/appRegistry";
+import { capacityFailureReason } from "@/lib/xero/compliance";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
 import { requireSession } from "@/lib/session";
@@ -21,6 +23,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ app
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 404 });
+  }
+
+  // Spec 7.6.7: capacity is checked before the consent URL is built, so a full
+  // app never sends someone to Xero to approve access that cannot be stored.
+  // Disconnected and disabled connections do not occupy a slot.
+  const occupiedSlots = db
+    .select({ id: xeroConnections.id })
+    .from(xeroConnections)
+    .where(
+      and(
+        eq(xeroConnections.xeroAppId, app.id),
+        notInArray(xeroConnections.status, ["disconnected", "disabled"])
+      )
+    )
+    .all();
+
+  const capacityProblem = capacityFailureReason(app, occupiedSlots.length);
+  if (capacityProblem) {
+    await recordAuditEvent({
+      actorEmail: actor.email,
+      action: "xero_oauth.capacity_blocked",
+      resourceType: "xero_app",
+      resourceId: app.id,
+      detail: { occupied: occupiedSlots.length, limit: app.connectionLimit, tier: app.tier },
+    });
+    return NextResponse.json({ error: capacityProblem }, { status: 409 });
   }
 
   // Whoever authorises a Xero organisation is recorded from their session and

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { db } from "@/db/client";
-import { users } from "@/db/schema";
+import { users, auditEvents } from "@/db/schema";
 import { hashPassword, verifyPassword } from "@/lib/auth";
 import { createSession, setSessionCookie } from "@/lib/session";
 import { recordAuditEvent } from "@/lib/audit";
 import { nowUtcIso } from "@/lib/dates";
+import { throttleDecision, WINDOW_MS } from "@/lib/loginThrottle";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -31,6 +32,34 @@ export async function POST(request: Request) {
   }
 
   const email = parsed.data.email.trim().toLowerCase();
+
+  // Counted from the audit trail itself, so throttling and the recorded
+  // history can never disagree. ISO-8601 strings sort lexicographically, so a
+  // string comparison is a valid time comparison here.
+  const since = new Date(Date.now() - WINDOW_MS).toISOString();
+  const recentFailures = db
+    .select({ createdAt: auditEvents.createdAt })
+    .from(auditEvents)
+    .where(and(eq(auditEvents.action, "auth.login_failed"), eq(auditEvents.actorEmail, email), gte(auditEvents.createdAt, since)))
+    .all();
+
+  const throttle = throttleDecision(
+    recentFailures.map((r) => r.createdAt),
+    Date.now()
+  );
+
+  if (throttle.blocked) {
+    await recordAuditEvent({
+      actorEmail: email,
+      action: "auth.login_throttled",
+      detail: { recentFailures: throttle.recentFailures },
+    });
+    return NextResponse.json(
+      { error: "Too many failed attempts. Try again shortly." },
+      { status: 429, headers: { "Retry-After": String(throttle.retryAfterSeconds) } }
+    );
+  }
+
   const user = db.select().from(users).where(eq(users.email, email)).get();
   const passwordOk = verifyPassword(parsed.data.password, user?.passwordHash ?? decoyHash());
 

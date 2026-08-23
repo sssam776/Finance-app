@@ -92,11 +92,53 @@ export function complianceFailureReason(
   return null;
 }
 
+/**
+ * Spec 7.6.7 — "Capacity is checked before starting OAuth; reaching capacity
+ * creates an admin decision, not an automatic spillover."
+ *
+ * Checked before building the consent URL rather than after the callback, so
+ * nobody is sent to Xero, asked to approve access to their accounting data,
+ * and only then told there was no room for them.
+ *
+ * There is deliberately no automatic fallback to another app with spare
+ * capacity: spec 7.6.2 forbids the router picking an app because it has room,
+ * and spec 3.3 forbids a second same-purpose Starter app as a free-tier
+ * workaround. Reaching the ceiling is a commercial decision (Core tier), so
+ * the code stops and says so.
+ */
+export function capacityFailureReason(
+  app: Pick<ComplianceCheckInput, "appKey"> & { tier: string; connectionLimit: number },
+  activeConnectionCount: number
+): string | null {
+  if (activeConnectionCount < app.connectionLimit) return null;
+
+  return (
+    `Xero app "${app.appKey}" is at capacity: ${activeConnectionCount} of ${app.connectionLimit} ` +
+    `connections used on the ${app.tier} tier. Spec 7.6.7 requires an admin decision here, not an ` +
+    `automatic spillover to another app. Upgrade the tier or retire an existing connection first.`
+  );
+}
+
 export class XeroComplianceError extends Error {
   constructor(reason: string) {
     super(reason);
     this.name = "XeroComplianceError";
   }
+}
+
+export class XeroCapacityError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "XeroCapacityError";
+  }
+}
+
+export function assertCapacityAvailable(
+  app: Pick<ComplianceCheckInput, "appKey"> & { tier: string; connectionLimit: number },
+  activeConnectionCount: number
+): void {
+  const reason = capacityFailureReason(app, activeConnectionCount);
+  if (reason) throw new XeroCapacityError(reason);
 }
 
 export function assertXeroAppUsable(app: ComplianceCheckInput, context: ComplianceContext): void {
