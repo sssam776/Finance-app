@@ -268,6 +268,73 @@ export const bankBalanceSnapshots = sqliteTable("bank_balance_snapshots", {
 });
 
 // ---------------------------------------------------------------------------
+// 15.1 Identity and access
+// ---------------------------------------------------------------------------
+
+export const users = sqliteTable("users", {
+  id: id(),
+  email: text("email").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role", { enum: ["admin", "viewer"] })
+    .notNull()
+    .default("viewer"),
+  status: text("status", { enum: ["active", "disabled"] })
+    .notNull()
+    .default("active"),
+  lastLoginAt: text("last_login_at"),
+  ...timestamps(),
+});
+
+/**
+ * `id` holds the SHA-256 of the session token, never the token itself — the
+ * raw token only ever exists in the user's cookie. Read access to this table
+ * therefore does not hand over live sessions.
+ */
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    sessionsUserIdx: index("sessions_user_idx").on(t.userId),
+  })
+);
+
+// ---------------------------------------------------------------------------
+// 18. CASH-005 — configurable variance exception thresholds
+// ---------------------------------------------------------------------------
+
+/**
+ * `entityId` is the literal `"*"` for the group-wide default, otherwise an
+ * entity id. It is deliberately NOT a foreign key and NOT nullable: SQLite
+ * treats NULLs as distinct in a unique index, so a nullable "global" row
+ * could silently be duplicated. A sentinel keeps one row per scope
+ * enforceable by the database rather than by convention.
+ */
+export const GLOBAL_THRESHOLD_SCOPE = "*";
+
+export const varianceThresholds = sqliteTable(
+  "variance_thresholds",
+  {
+    id: id(),
+    entityId: text("entity_id").notNull(),
+    absoluteAmount: text("absolute_amount").notNull(), // decimal string
+    percent: text("percent"), // decimal string, optional second trigger
+    updatedByEmail: text("updated_by_email").notNull(),
+    ...timestamps(),
+  },
+  (t) => ({
+    varianceThresholdScopeUnique: uniqueIndex("variance_thresholds_scope_unique").on(t.entityId),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // 15.5 Audit
 // ---------------------------------------------------------------------------
 
