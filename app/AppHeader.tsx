@@ -59,10 +59,10 @@ export function AppHeader() {
 
           {me && (
             <div className="flex items-center gap-3 border-l border-slate-200 pl-6 text-sm">
-              <div className="text-right leading-tight">
+              <Link href="/account" className="text-right leading-tight hover:opacity-80">
                 <div className="text-slate-700">{me.displayName}</div>
                 <div className="text-xs text-slate-400">{me.role}</div>
-              </div>
+              </Link>
               <button onClick={signOut} className="text-xs text-slate-500 underline hover:text-slate-800">
                 Sign out
               </button>
