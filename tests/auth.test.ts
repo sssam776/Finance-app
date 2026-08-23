@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   hashPassword,
   verifyPassword,
+  normaliseEmail,
   hashSessionToken,
   newSessionToken,
   isExpired,
@@ -30,6 +31,23 @@ describe("password hashing", () => {
     expect(verifyPassword("anything", "bcrypt$salt$hash")).toBe(false);
     expect(verifyPassword("anything", "scrypt$onlytwo")).toBe(false);
     expect(verifyPassword("anything", "scrypt$abc$00")).toBe(false);
+  });
+});
+
+describe("normaliseEmail", () => {
+  it("lowercases, so a mixed-case address can still sign in", () => {
+    // The bug this prevents: a user inserted as Alice@X and looked up as
+    // alice@x exists in the table and can never authenticate.
+    expect(normaliseEmail("Alice@Ramwall.LOCAL")).toBe("alice@ramwall.local");
+  });
+
+  it("trims surrounding whitespace from a pasted address", () => {
+    expect(normaliseEmail("  admin@ramwall.local \n")).toBe("admin@ramwall.local");
+  });
+
+  it("is idempotent", () => {
+    const once = normaliseEmail(" Bob@Example.COM ");
+    expect(normaliseEmail(once)).toBe(once);
   });
 });
 

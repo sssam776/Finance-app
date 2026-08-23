@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./client";
 import { entities, xeroApps, users, varianceThresholds, GLOBAL_THRESHOLD_SCOPE } from "./schema";
 import { nowUtcIso } from "../lib/dates";
-import { hashPassword } from "../lib/auth";
+import { hashPassword, normaliseEmail } from "../lib/auth";
 
 /**
  * Seeds the entity registry from spec section 7.1 candidates and one
@@ -84,7 +84,7 @@ async function seed() {
  * shipped in source is worse than a manual copy-paste step.
  */
 function seedAdminUser(now: string) {
-  const adminEmail = (process.env.ADMIN_EMAIL ?? "admin@ramwall.local").trim().toLowerCase();
+  const adminEmail = normaliseEmail(process.env.ADMIN_EMAIL ?? "admin@ramwall.local");
   const existing = db.select().from(users).where(eq(users.email, adminEmail)).get();
 
   if (existing) {

@@ -40,6 +40,18 @@ export function verifyPassword(password: string, stored: string): boolean {
   return timingSafeEqual(derived, expectedBuf);
 }
 
+/**
+ * The single definition of how an email is stored and looked up.
+ *
+ * The login route lowercases before querying, so anything that WRITES a user
+ * must lowercase too or the account simply cannot sign in. That rule was
+ * previously implicit in each caller, and a mixed-case address inserted
+ * directly produced a user who existed and could never authenticate.
+ */
+export function normaliseEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export function newSessionToken(): string {
   return randomBytes(TOKEN_BYTES).toString("base64url");
 }

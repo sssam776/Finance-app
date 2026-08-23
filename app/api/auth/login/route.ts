@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq, gte } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users, auditEvents } from "@/db/schema";
-import { hashPassword, verifyPassword } from "@/lib/auth";
+import { hashPassword, verifyPassword, normaliseEmail } from "@/lib/auth";
 import { createSession, setSessionCookie } from "@/lib/session";
 import { recordAuditEvent } from "@/lib/audit";
 import { nowUtcIso } from "@/lib/dates";
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
   }
 
-  const email = parsed.data.email.trim().toLowerCase();
+  const email = normaliseEmail(parsed.data.email);
 
   // Counted from the audit trail itself, so throttling and the recorded
   // history can never disagree. ISO-8601 strings sort lexicographically, so a

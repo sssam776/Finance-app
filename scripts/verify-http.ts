@@ -9,7 +9,7 @@ import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { users } from "../db/schema";
-import { hashPassword } from "../lib/auth";
+import { hashPassword, normaliseEmail } from "../lib/auth";
 import { nowUtcIso } from "../lib/dates";
 
 import { assertLocalDevDatabase, adminPassword } from "./guardTestDb";
@@ -21,8 +21,9 @@ assertLocalDevDatabase();
 const ADMIN_PASSWORD = adminPassword();
 
 // Suffixed per run so the script cannot delete a real account that happens to
-// share a fixed test address.
-const VIEWER_EMAIL = `verify-viewer-${nanoid(8)}@ramwall.invalid`;
+// share a fixed test address. Normalised because nanoid emits mixed case and
+// the login route lowercases before looking a user up.
+const VIEWER_EMAIL = normaliseEmail(`verify-viewer-${nanoid(8)}@ramwall.invalid`);
 const VIEWER_PASSWORD = "viewer-" + nanoid(12);
 
 let pass = 0;
