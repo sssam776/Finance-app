@@ -14,15 +14,23 @@ import { nowUtcIso } from "../lib/dates";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@ramwall.local";
-const ADMIN_PASSWORD = process.argv[2];
+// Narrowed through a helper rather than a bare guard: a module-level check
+// does not narrow the binding inside main(), which runs later.
+function required(value: string | undefined, usage: string): string {
+  if (!value) {
+    console.error(usage);
+    process.exit(1);
+  }
+  return value;
+}
+
+const ADMIN_PASSWORD = required(
+  process.argv[2],
+  "Usage: npx tsx scripts/verify-http.ts <admin-password>"
+);
 
 const VIEWER_EMAIL = "verify-viewer@ramwall.local";
 const VIEWER_PASSWORD = "viewer-" + nanoid(12);
-
-if (!ADMIN_PASSWORD) {
-  console.error("Usage: npx tsx scripts/verify-http.ts <admin-password>");
-  process.exit(1);
-}
 
 let pass = 0;
 let fail = 0;
