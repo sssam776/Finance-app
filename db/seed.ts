@@ -1,7 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { nanoid } from "nanoid";
+import { eq } from "drizzle-orm";
 import { db } from "./client";
-import { entities, xeroApps } from "./schema";
+import { entities, xeroApps, users, varianceThresholds, GLOBAL_THRESHOLD_SCOPE } from "./schema";
 import { nowUtcIso } from "../lib/dates";
+import { hashPassword } from "../lib/auth";
 
 /**
  * Seeds the entity registry from spec section 7.1 candidates and one
@@ -65,7 +68,72 @@ async function seed() {
     .onConflictDoNothing()
     .run();
 
+  seedAdminUser(now);
+  seedDefaultThreshold(now);
+
   console.log(`Seeded ${CANDIDATE_ENTITIES.length} candidate entities and 1 Xero app (development).`);
+}
+
+/**
+ * Creates the first admin account. Re-running the seed never resets an
+ * existing password — otherwise a routine `db:seed` would silently hand the
+ * account back to whoever last read the console.
+ *
+ * With no ADMIN_INITIAL_PASSWORD set, a random one is generated and printed
+ * exactly once. There is deliberately no default password: a known credential
+ * shipped in source is worse than a manual copy-paste step.
+ */
+function seedAdminUser(now: string) {
+  const adminEmail = (process.env.ADMIN_EMAIL ?? "admin@ramwall.local").trim().toLowerCase();
+  const existing = db.select().from(users).where(eq(users.email, adminEmail)).get();
+
+  if (existing) {
+    console.log(`Admin user ${adminEmail} already exists — password left unchanged.`);
+    return;
+  }
+
+  const fromEnv = process.env.ADMIN_INITIAL_PASSWORD;
+  const password = fromEnv ?? randomBytes(12).toString("base64url");
+
+  db.insert(users)
+    .values({
+      id: nanoid(),
+      email: adminEmail,
+      displayName: "Ramwall Administrator",
+      passwordHash: hashPassword(password),
+      role: "admin",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
+
+  console.log(`\nCreated admin user: ${adminEmail}`);
+  if (!fromEnv) {
+    console.log(`Generated password:  ${password}`);
+    console.log("Store it now — only its scrypt hash is kept, so it cannot be shown again.\n");
+  }
+}
+
+/**
+ * CASH-005 needs a threshold to compare against before anyone configures one.
+ * $1,000 / 1% is a starting point for the Financial Controller to change, not
+ * an accounting policy decision — it is stored as data, never hard-coded into
+ * the dashboard (REM-001).
+ */
+function seedDefaultThreshold(now: string) {
+  db.insert(varianceThresholds)
+    .values({
+      id: nanoid(),
+      entityId: GLOBAL_THRESHOLD_SCOPE,
+      absoluteAmount: "1000.00",
+      percent: "1.00",
+      updatedByEmail: "seed@local",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing()
+    .run();
 }
 
 seed();
