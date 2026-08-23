@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { Money } from "./money";
-import { GLOBAL_THRESHOLD_SCOPE } from "@/db/schema";
+import { GLOBAL_THRESHOLD_SCOPE, type ThresholdContext } from "@/db/schema";
 
 /**
  * CASH-005 — configurable variance exception thresholds.
@@ -13,6 +13,7 @@ import { GLOBAL_THRESHOLD_SCOPE } from "@/db/schema";
 
 export interface ThresholdRow {
   entityId: string;
+  context: ThresholdContext;
   absoluteAmount: string;
   percent: string | null;
 }
@@ -20,28 +21,38 @@ export interface ThresholdRow {
 export interface ResolvedThreshold {
   /** Which row was applied, so the UI can say why a row is flagged. */
   scope: "entity" | "group";
+  context: ThresholdContext;
   absoluteAmount: string;
   percent: string | null;
 }
 
-/** An entity's own threshold overrides the group default. */
+/**
+ * An entity's own threshold overrides the group default, within one context.
+ * Contexts never fall back to one another: a missing balance-sheet materiality
+ * is not a reason to apply the cash tolerance instead.
+ */
 export function resolveThreshold(
   rows: ThresholdRow[],
-  entityId: string
+  entityId: string,
+  context: ThresholdContext = "cash"
 ): ResolvedThreshold | null {
-  const forEntity = rows.find((r) => r.entityId === entityId);
+  const inContext = rows.filter((r) => r.context === context);
+
+  const forEntity = inContext.find((r) => r.entityId === entityId);
   if (forEntity) {
     return {
       scope: "entity",
+      context,
       absoluteAmount: forEntity.absoluteAmount,
       percent: forEntity.percent,
     };
   }
 
-  const groupDefault = rows.find((r) => r.entityId === GLOBAL_THRESHOLD_SCOPE);
+  const groupDefault = inContext.find((r) => r.entityId === GLOBAL_THRESHOLD_SCOPE);
   if (groupDefault) {
     return {
       scope: "group",
+      context,
       absoluteAmount: groupDefault.absoluteAmount,
       percent: groupDefault.percent,
     };

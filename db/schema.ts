@@ -347,18 +347,39 @@ export const entityPermissions = sqliteTable(
  */
 export const GLOBAL_THRESHOLD_SCOPE = "*";
 
+/**
+ * `context` separates tolerances that happen to share a shape but mean
+ * different things. A $1,000 cash variance tolerance is not $1,000 of
+ * balance-sheet materiality: reusing one as the other marks every account
+ * over $1,000 material and buries the ones that matter.
+ *
+ * Defaults to 'cash' so the existing CASH-005 rows and callers are unchanged.
+ */
+export const THRESHOLD_CONTEXTS = [
+  "cash",
+  "pnl_movement",
+  "budget_variance",
+  "balance_sheet",
+] as const;
+
+export type ThresholdContext = (typeof THRESHOLD_CONTEXTS)[number];
+
 export const varianceThresholds = sqliteTable(
   "variance_thresholds",
   {
     id: id(),
     entityId: text("entity_id").notNull(),
+    context: text("context", { enum: THRESHOLD_CONTEXTS }).notNull().default("cash"),
     absoluteAmount: text("absolute_amount").notNull(), // decimal string
     percent: text("percent"), // decimal string, optional second trigger
     updatedByEmail: text("updated_by_email").notNull(),
     ...timestamps(),
   },
   (t) => ({
-    varianceThresholdScopeUnique: uniqueIndex("variance_thresholds_scope_unique").on(t.entityId),
+    varianceThresholdScopeUnique: uniqueIndex("variance_thresholds_scope_context_unique").on(
+      t.entityId,
+      t.context
+    ),
   })
 );
 

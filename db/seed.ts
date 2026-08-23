@@ -126,6 +126,7 @@ function seedDefaultThreshold(now: string) {
     .values({
       id: nanoid(),
       entityId: GLOBAL_THRESHOLD_SCOPE,
+      context: "cash",
       absoluteAmount: "1000.00",
       percent: "1.00",
       updatedByEmail: "seed@local",
