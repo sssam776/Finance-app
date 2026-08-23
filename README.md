@@ -16,18 +16,43 @@ engineering rules, not a remediation of an existing app.
 npm install
 cp .env.example .env.local   # fill in Xero credentials + encryption key
 npx tsx db/migrate.ts
-npx tsx db/seed.ts
+npx tsx db/seed.ts           # prints the generated admin password — save it
 npm run dev
 ```
 
-Open http://localhost:3000. Pages:
+The seed creates the first admin account from `ADMIN_EMAIL` (default
+`admin@ramwall.local`). Leave `ADMIN_INITIAL_PASSWORD` blank and it generates
+a random password and prints it **once** — only the scrypt hash is stored, so
+it cannot be recovered afterwards. Re-running the seed never resets an
+existing account's password.
 
-- **Cash Position** (`/`) — bank vs. Xero balance variance.
+Open http://localhost:3000 and sign in. Pages:
+
+- **Cash Position** (`/`) — bank vs. Xero balance variance, exceptions
+  flagged against the configured threshold, and per-row drill-through to the
+  bank import and Xero sync run behind each figure.
 - **Entities** (`/entities`) — the seeded (unverified) entity list, bank
   account mappings, and a manual "sync now" trigger.
 - **Bank Imports** (`/imports`) — upload an ASB/BNZ CSV export.
 - **Xero Connections** (`/xero`) — connect a Xero organisation and assign
   it to an entity.
+
+## Access control
+
+Two roles. `viewer` reads every page; `admin` can additionally import
+statements, map bank accounts, connect Xero organisations, assign connections
+and change variance thresholds. Every write is recorded in `audit_events`
+against the signed-in user — actor identity is never taken from a request
+body or form field.
+
+`middleware.ts` redirects signed-out browsers to `/login`, but it is not the
+security boundary: it runs on the Edge runtime and can only see whether a
+cookie exists. Each API route resolves the session itself and rejects a
+forged or expired one.
+
+There is no change-password or reset flow yet, and `/api/auth/login` is
+audited but not rate-limited. Both are tracked in
+`docs/implementation-plan.md`.
 
 ## What's real vs. what's a placeholder
 

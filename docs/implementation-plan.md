@@ -35,17 +35,32 @@ above.
 
 ## Phase 1 — Harden the read slice
 
-- Configurable exception thresholds (CASH-005) and a variance drill-through
-  to the underlying sync run / import (CASH-006).
-- Concurrent token-refresh locking (§8.5) — Durable Object if/when this
-  moves to Cloudflare, otherwise a D1/SQLite lease with expiry.
+Done since the first slice:
+
+- **Authentication and actor identity.** Email/password sign-in with scrypt
+  hashing, hashed session tokens in httpOnly cookies, and `admin`/`viewer`
+  roles. Every route resolves its actor from the session — no route accepts
+  an actor email from a request body any more.
+- **Production compliance gate (§9.6)** enforced at `buildXeroClient`, the
+  single choke point for every Xero call.
+- **Concurrent token-refresh locking (§8.5)** as a compare-and-swap on
+  `refresh_version`. No Durable Object needed; the same CAS works against D1.
+- **CASH-005** configurable variance thresholds and **CASH-006** drill-through
+  to the originating bank import and Xero sync run.
+
+Still open in this phase:
+
+- Per-entity permissions (`entity_permissions`) — the current roles are
+  global, so an admin is an admin for all eight entities.
 - Contacts, invoices, bank transactions, manual journals sync (currently
   only Accounts + Bank Summary are pulled).
 - Connection health dashboard (§17.6) — currently only `status` and
   `lastSuccessfulCallAt` are stored, not surfaced with staleness warnings.
-- Identity/access: `users`, `roles`, `entity_permissions` — there is
-  currently no authentication at all; every route trusts a client-supplied
-  email string. This must be fixed before any non-local deployment.
+- Password self-service: there is no change-password or reset flow yet, so
+  rotating the seeded admin credential means re-seeding against a fresh
+  email or updating the row directly.
+- Rate limiting on `/api/auth/login`. Failed attempts are audited but not
+  throttled.
 
 ## Phase 2 — Board and management reporting (Module B, C, D)
 
