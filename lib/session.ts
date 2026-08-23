@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { users, sessions } from "@/db/schema";
+import { users, sessions, entityPermissions } from "@/db/schema";
 import { nowUtcIso } from "./dates";
+import { resolveEntityAccess, type EntityAccess } from "./entityAccess";
 import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -126,4 +127,22 @@ export async function requireSession(
   if (!user) return unauthorized();
   if (minimumRole === "admin" && user.role !== "admin") return forbidden();
   return user;
+}
+
+/**
+ * Which entities this user may see (spec 14.1). Resolved here rather than in
+ * each route so every caller applies the same rule; see lib/entityAccess.ts
+ * for what that rule is and why.
+ */
+export function entityAccessFor(user: SessionUser): EntityAccess {
+  const granted = db
+    .select({ entityId: entityPermissions.entityId })
+    .from(entityPermissions)
+    .where(eq(entityPermissions.userId, user.id))
+    .all();
+
+  return resolveEntityAccess(
+    user.role,
+    granted.map((g) => g.entityId)
+  );
 }

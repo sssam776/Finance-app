@@ -6,7 +6,8 @@ import { entityBankAccounts } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
-import { requireSession } from "@/lib/session";
+import { requireSession, entityAccessFor } from "@/lib/session";
+import { canAccessEntity, filterByEntityAccess } from "@/lib/entityAccess";
 
 const createSchema = z.object({
   entityId: z.string().min(1),
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
     ? db.select().from(entityBankAccounts).where(eq(entityBankAccounts.entityId, entityId)).all()
     : db.select().from(entityBankAccounts).all();
 
-  return NextResponse.json({ bankAccounts: rows });
+  return NextResponse.json({ bankAccounts: filterByEntityAccess(entityAccessFor(actor), rows) });
 }
 
 export async function POST(request: Request) {
@@ -40,6 +41,10 @@ export async function POST(request: Request) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  if (!canAccessEntity(entityAccessFor(actor), parsed.data.entityId)) {
+    return NextResponse.json({ error: "No access to this entity" }, { status: 403 });
   }
 
   const now = nowUtcIso();

@@ -6,7 +6,8 @@ import { db } from "@/db/client";
 import { entityXeroAppAssignments, xeroConnections } from "@/db/schema";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
-import { requireSession } from "@/lib/session";
+import { requireSession, entityAccessFor } from "@/lib/session";
+import { canAccessEntity, filterByEntityAccess } from "@/lib/entityAccess";
 
 /**
  * Enforces spec 7.6.3: no entity may have two active same-purpose
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
   const rows = entityId
     ? db.select().from(entityXeroAppAssignments).where(eq(entityXeroAppAssignments.entityId, entityId)).all()
     : db.select().from(entityXeroAppAssignments).all();
-  return NextResponse.json({ assignments: rows });
+  return NextResponse.json({ assignments: filterByEntityAccess(entityAccessFor(actor), rows) });
 }
 
 export async function POST(request: Request) {
@@ -44,6 +45,10 @@ export async function POST(request: Request) {
   }
   const { entityId, purpose, connectionId } = parsed.data;
   const createdBy = actor.email;
+
+  if (!canAccessEntity(entityAccessFor(actor), entityId)) {
+    return NextResponse.json({ error: "No access to this entity" }, { status: 403 });
+  }
 
   const connection = db.select().from(xeroConnections).where(eq(xeroConnections.id, connectionId)).get();
   if (!connection) {

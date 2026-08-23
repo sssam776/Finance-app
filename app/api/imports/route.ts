@@ -7,7 +7,8 @@ import { nowUtcIso } from "@/lib/dates";
 import { parseBankCsv, PARSER_VERSION } from "@/lib/csv/parseBankCsv";
 import { storeRawFile } from "@/lib/rawFileStore";
 import { recordAuditEvent } from "@/lib/audit";
-import { requireSession } from "@/lib/session";
+import { requireSession, entityAccessFor } from "@/lib/session";
+import { canAccessEntity, filterByEntityAccess } from "@/lib/entityAccess";
 
 /**
  * Server-side CSV ingestion per REM-002/REM-003: the raw file is stored
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     .orderBy(desc(bankImports.fileReceivedAt))
     .all();
 
-  return NextResponse.json({ imports: rows });
+  return NextResponse.json({ imports: filterByEntityAccess(entityAccessFor(actor), rows) });
 }
 
 export async function POST(request: Request) {
@@ -74,6 +75,11 @@ export async function POST(request: Request) {
 
   if (!bankAccount) {
     return NextResponse.json({ error: "Unknown entityBankAccountId" }, { status: 404 });
+  }
+  // Scope is checked on the write path too. Being an admin does not mean being
+  // an admin for every entity once explicit grants exist.
+  if (!canAccessEntity(entityAccessFor(actor), bankAccount.entityId)) {
+    return NextResponse.json({ error: "No access to this entity" }, { status: 403 });
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());

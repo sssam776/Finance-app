@@ -15,6 +15,13 @@
       "when": 1787475069697,
       "tag": "0001_black_gabe_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787490363445,
+      "tag": "0002_big_gladiator",
+      "breakpoints": true
     }
   ]
 }

@@ -13,7 +13,8 @@ import { desc, eq, and } from "drizzle-orm";
 import { Money, variancePercent } from "@/lib/money";
 import { oldestDateOnly } from "@/lib/dates";
 import { resolveThreshold, isVarianceException } from "@/lib/thresholds";
-import { requireSession } from "@/lib/session";
+import { requireSession, entityAccessFor } from "@/lib/session";
+import { canAccessEntity } from "@/lib/entityAccess";
 
 /**
  * CASH-001..006: per mapped bank account, the latest bank-source balance,
@@ -28,6 +29,7 @@ export async function GET() {
   const actor = await requireSession();
   if (actor instanceof NextResponse) return actor;
 
+  const access = entityAccessFor(actor);
   const allEntities = db.select().from(entities).all();
   const allBankAccounts = db.select().from(entityBankAccounts).all();
   const thresholdRows = db.select().from(varianceThresholds).all();
@@ -37,6 +39,9 @@ export async function GET() {
   for (const account of allBankAccounts) {
     const entity = allEntities.find((e) => e.id === account.entityId);
     if (!entity) continue;
+    // Filtered before the row is built, so an out-of-scope entity contributes
+    // nothing to the totals or the exception count either.
+    if (!canAccessEntity(access, entity.id)) continue;
 
     // Secondary sort by createdAt: two imports can share a balance date, and
     // "latest" must then mean the one most recently ingested, not whichever

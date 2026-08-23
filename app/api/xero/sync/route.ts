@@ -7,7 +7,8 @@ import { resolveXeroRoute, getAuthenticatedClient } from "@/lib/xero/gateway";
 import { parseBankSummaryClosingBalances } from "@/lib/xero/reports";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
-import { requireSession } from "@/lib/session";
+import { requireSession, entityAccessFor } from "@/lib/session";
+import { canAccessEntity } from "@/lib/entityAccess";
 
 /**
  * Fetches Accounts (reference data) and the Bank Summary report (closing
@@ -25,6 +26,9 @@ export async function POST(request: Request) {
   const entityId = body.entityId;
   if (typeof entityId !== "string" || entityId === "") {
     return NextResponse.json({ error: "Missing entityId" }, { status: 400 });
+  }
+  if (!canAccessEntity(entityAccessFor(actor), entityId)) {
+    return NextResponse.json({ error: "No access to this entity" }, { status: 403 });
   }
 
   const now = nowUtcIso();

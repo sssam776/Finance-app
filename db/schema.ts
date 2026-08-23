@@ -306,6 +306,34 @@ export const sessions = sqliteTable(
   })
 );
 
+/**
+ * Spec 14.1 / 31 — per-entity scoping.
+ *
+ * `users.role` is the capability axis (what a person may do); this table is
+ * the scope axis (which entities they may do it to). Keeping them separate
+ * avoids inventing a second identity system, which spec 31 forbids without
+ * an ADR, while still allowing a preparer to be trusted with one entity and
+ * not another.
+ */
+export const entityPermissions = sqliteTable(
+  "entity_permissions",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id),
+    grantedByEmail: text("granted_by_email").notNull(),
+    ...timestamps(),
+  },
+  (t) => ({
+    entityPermissionUnique: uniqueIndex("entity_permissions_unique").on(t.userId, t.entityId),
+    entityPermissionUserIdx: index("entity_permissions_user_idx").on(t.userId),
+  })
+);
+
 // ---------------------------------------------------------------------------
 // 18. CASH-005 — configurable variance exception thresholds
 // ---------------------------------------------------------------------------
