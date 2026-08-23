@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { throttleDecision, MAX_FAILURES, WINDOW_MS } from "../lib/loginThrottle";
+import {
+  throttleDecision,
+  combinedThrottleDecision,
+  MAX_FAILURES,
+  MAX_GLOBAL_FAILURES,
+  WINDOW_MS,
+} from "../lib/loginThrottle";
 
 const NOW = 1_700_000_000_000;
 const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
@@ -60,5 +66,43 @@ describe("throttleDecision", () => {
   it("ignores unparseable timestamps rather than counting them", () => {
     const junk = Array.from({ length: MAX_FAILURES }, () => "not-a-date");
     expect(throttleDecision(junk, NOW).blocked).toBe(false);
+  });
+});
+
+describe("combinedThrottleDecision", () => {
+  it("allows a normal login with light global traffic", () => {
+    const d = combinedThrottleDecision([], [iso(-1000), iso(-2000)], NOW);
+    expect(d.blocked).toBe(false);
+  });
+
+  it("blocks on the per-email limit first, and says so", () => {
+    const email = Array.from({ length: MAX_FAILURES }, (_, i) => iso(-i * 1000));
+    const d = combinedThrottleDecision(email, email, NOW);
+    expect(d.blocked).toBe(true);
+    expect(d.scope).toBe("email");
+  });
+
+  it("blocks an attacker who varies the address, which per-email counting misses", () => {
+    // The bypass: every address is fresh, so no per-email counter ever fills.
+    const spread = Array.from({ length: MAX_GLOBAL_FAILURES }, (_, i) => iso(-i * 100));
+    const d = combinedThrottleDecision([], spread, NOW);
+    expect(d.blocked).toBe(true);
+    expect(d.scope).toBe("global");
+  });
+
+  it("leaves normal shared use alone below the global limit", () => {
+    // Several people fumbling passwords at once must not lock out the company.
+    const spread = Array.from({ length: MAX_GLOBAL_FAILURES - 1 }, (_, i) => iso(-i * 100));
+    expect(combinedThrottleDecision([], spread, NOW).blocked).toBe(false);
+  });
+
+  it("sets the global limit well above the per-email limit", () => {
+    expect(MAX_GLOBAL_FAILURES).toBeGreaterThan(MAX_FAILURES * 5);
+  });
+
+  it("lifts the global block as the window slides", () => {
+    const spread = Array.from({ length: MAX_GLOBAL_FAILURES }, (_, i) => iso(-i * 100));
+    expect(combinedThrottleDecision([], spread, NOW).blocked).toBe(true);
+    expect(combinedThrottleDecision([], spread, NOW + WINDOW_MS + 1).blocked).toBe(false);
   });
 });

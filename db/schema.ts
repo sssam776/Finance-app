@@ -366,13 +366,29 @@ export const varianceThresholds = sqliteTable(
 // 15.5 Audit
 // ---------------------------------------------------------------------------
 
-export const auditEvents = sqliteTable("audit_events", {
-  id: id(),
-  actorEmail: text("actor_email").notNull(),
-  action: text("action").notNull(),
-  entityId: text("entity_id"),
-  resourceType: text("resource_type"),
-  resourceId: text("resource_id"),
-  detail: text("detail"), // JSON string, no secrets
-  createdAt: text("created_at").notNull(),
-});
+export const auditEvents = sqliteTable(
+  "audit_events",
+  {
+    id: id(),
+    actorEmail: text("actor_email").notNull(),
+    action: text("action").notNull(),
+    entityId: text("entity_id"),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    detail: text("detail"), // JSON string, no secrets
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    // The login throttle queries (action, actor_email, created_at) on every
+    // attempt. Without this index that is a full scan of a table an
+    // unauthenticated caller can grow.
+    auditActionActorIdx: index("audit_events_action_actor_idx").on(
+      t.action,
+      t.actorEmail,
+      t.createdAt
+    ),
+    // Supports the global failure window, which counts by action and time
+    // across all addresses.
+    auditActionCreatedIdx: index("audit_events_action_created_idx").on(t.action, t.createdAt),
+  })
+);
