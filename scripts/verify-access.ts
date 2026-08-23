@@ -14,21 +14,13 @@ import { users, entities, entityPermissions, sessions, auditEvents } from "../db
 import { hashPassword } from "../lib/auth";
 import { nowUtcIso } from "../lib/dates";
 
+import { assertLocalDevDatabase, adminPassword } from "./guardTestDb";
+
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@ramwall.local";
 
-function required(value: string | undefined, usage: string): string {
-  if (!value) {
-    console.error(usage);
-    process.exit(1);
-  }
-  return value;
-}
-
-const ADMIN_PASSWORD = required(
-  process.argv[2],
-  "Usage: npx tsx scripts/verify-access.ts <admin-password>"
-);
+assertLocalDevDatabase();
+const ADMIN_PASSWORD = adminPassword();
 
 const SCOPED_EMAIL = "verify-scoped@ramwall.local";
 const ROTATE_EMAIL = "verify-rotate@ramwall.local";

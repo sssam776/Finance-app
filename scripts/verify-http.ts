@@ -12,24 +12,17 @@ import { users } from "../db/schema";
 import { hashPassword } from "../lib/auth";
 import { nowUtcIso } from "../lib/dates";
 
+import { assertLocalDevDatabase, adminPassword } from "./guardTestDb";
+
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@ramwall.local";
-// Narrowed through a helper rather than a bare guard: a module-level check
-// does not narrow the binding inside main(), which runs later.
-function required(value: string | undefined, usage: string): string {
-  if (!value) {
-    console.error(usage);
-    process.exit(1);
-  }
-  return value;
-}
 
-const ADMIN_PASSWORD = required(
-  process.argv[2],
-  "Usage: npx tsx scripts/verify-http.ts <admin-password>"
-);
+assertLocalDevDatabase();
+const ADMIN_PASSWORD = adminPassword();
 
-const VIEWER_EMAIL = "verify-viewer@ramwall.local";
+// Suffixed per run so the script cannot delete a real account that happens to
+// share a fixed test address.
+const VIEWER_EMAIL = `verify-viewer-${nanoid(8)}@ramwall.invalid`;
 const VIEWER_PASSWORD = "viewer-" + nanoid(12);
 
 let pass = 0;

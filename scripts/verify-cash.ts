@@ -26,16 +26,14 @@ import {
   varianceThresholds,
 } from "../db/schema";
 import { nowUtcIso } from "../lib/dates";
+import { assertLocalDevDatabase, adminPassword } from "./guardTestDb";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@ramwall.local";
-const ADMIN_PASSWORD = process.argv[2];
 const KEEP = process.argv.includes("--keep");
 
-if (!ADMIN_PASSWORD || ADMIN_PASSWORD.startsWith("--")) {
-  console.error("Usage: npx tsx scripts/verify-cash.ts <admin-password> [--keep]");
-  process.exit(1);
-}
+assertLocalDevDatabase();
+const ADMIN_PASSWORD = adminPassword();
 
 const XERO_CODE = "090";
 const CSV = [
@@ -138,6 +136,14 @@ async function main() {
   console.log(`      using entity ${entity.shortCode}`);
 
   clearPreviousRun(entity.id);
+
+  // Captured so cleanup restores what was actually configured, rather than a
+  // hard-coded default that would quietly overwrite a real threshold.
+  const originalGroupThreshold = db
+    .select()
+    .from(varianceThresholds)
+    .where(eq(varianceThresholds.entityId, "*"))
+    .get();
 
   console.log("\n--- create a mapped bank account ---");
   const created = await call("/api/bank-accounts", {
@@ -250,10 +256,16 @@ async function main() {
     // Drop the tight entity override so the row is flagged by the group
     // default instead, which is the configuration a reviewer should see.
     db.delete(varianceThresholds).where(eq(varianceThresholds.entityId, entity.id)).run();
-    db.update(varianceThresholds)
-      .set({ absoluteAmount: "1000.00", percent: "1.00", updatedAt: nowUtcIso() })
-      .where(eq(varianceThresholds.entityId, "*"))
-      .run();
+    if (originalGroupThreshold) {
+      db.update(varianceThresholds)
+        .set({
+          absoluteAmount: originalGroupThreshold.absoluteAmount,
+          percent: originalGroupThreshold.percent,
+          updatedAt: nowUtcIso(),
+        })
+        .where(eq(varianceThresholds.entityId, "*"))
+        .run();
+    }
 
     console.log("\n--- left in place for review (--keep) ---");
     console.log(`      entity          ${entity.shortCode}`);
@@ -272,11 +284,21 @@ async function main() {
     db.delete(syncRuns).where(eq(syncRuns.id, syncRunId)).run();
     db.delete(entityBankAccounts).where(eq(entityBankAccounts.id, bankAccountId)).run();
     db.delete(varianceThresholds).where(eq(varianceThresholds.entityId, entity.id)).run();
-    db.update(varianceThresholds)
-      .set({ absoluteAmount: "1000.00", percent: "1.00", updatedAt: nowUtcIso() })
-      .where(eq(varianceThresholds.entityId, "*"))
-      .run();
-    console.log("      test data removed, group threshold restored to 1000.00 / 1.00%");
+    if (originalGroupThreshold) {
+      db.update(varianceThresholds)
+        .set({
+          absoluteAmount: originalGroupThreshold.absoluteAmount,
+          percent: originalGroupThreshold.percent,
+          updatedAt: nowUtcIso(),
+        })
+        .where(eq(varianceThresholds.entityId, "*"))
+        .run();
+    }
+    console.log(
+      originalGroupThreshold
+        ? `      test data removed, group threshold restored to ${originalGroupThreshold.absoluteAmount} / ${originalGroupThreshold.percent ?? "no"}%`
+        : "      test data removed"
+    );
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
