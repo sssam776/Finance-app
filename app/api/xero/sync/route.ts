@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { syncRuns, xeroAccounts, xeroConnections } from "@/db/schema";
+import { xeroAccounts } from "@/db/schema";
 import { resolveXeroRoute, getAuthenticatedClient } from "@/lib/xero/gateway";
+import { startSyncRun, completeSyncRun, failSyncRun } from "@/lib/xero/syncRun";
 import { parseBankSummaryClosingBalances } from "@/lib/xero/reports";
 import { nowUtcIso } from "@/lib/dates";
-import { recordAuditEvent } from "@/lib/audit";
 import { requireSession, entityAccessFor } from "@/lib/session";
 import { canAccessEntity } from "@/lib/entityAccess";
 
@@ -31,9 +31,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No access to this entity" }, { status: 403 });
   }
 
-  const now = nowUtcIso();
-  const syncRunId = nanoid();
-
   let route;
   try {
     route = await resolveXeroRoute(entityId, "read_core");
@@ -42,32 +39,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  db.insert(syncRuns)
-    .values({
-      id: syncRunId,
-      xeroAppId: route.xeroAppId,
-      connectionId: route.connectionId,
-      entityId,
-      resource: "accounts+bank_summary",
-      status: "running",
-      startedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
+  const syncRunId = startSyncRun({ route, resource: "accounts+bank_summary" });
 
   try {
     const { client, tenantId } = await getAuthenticatedClient(route);
 
-    const accountsResponse = await client.accountingApi.getAccounts(tenantId, undefined, "Type==\"BANK\"");
-    const bankAccounts = accountsResponse.body.accounts ?? [];
+    // Active accounts of every type, not only BANK. Later modules need the
+    // full chart, and a non-bank account simply carries a null balance: the
+    // unique index is on (entity_id, xero_account_id), so nothing collides.
+    const accountsResponse = await client.accountingApi.getAccounts(
+      tenantId,
+      undefined,
+      'Status=="ACTIVE"'
+    );
+    const accounts = accountsResponse.body.accounts ?? [];
 
     const bankSummary = await client.accountingApi.getReportBankSummary(tenantId);
     const closingBalances = parseBankSummaryClosingBalances(bankSummary.body);
     const balanceByName = new Map(closingBalances.map((b) => [b.accountName, b.closingBalance]));
 
+    const now = nowUtcIso();
     let recordsWritten = 0;
-    for (const account of bankAccounts) {
+
+    for (const account of accounts) {
       if (!account.accountID || !account.name) continue;
       const closingBalance = balanceByName.get(account.name) ?? null;
 
@@ -103,47 +97,17 @@ export async function POST(request: Request) {
       recordsWritten += 1;
     }
 
-    db.update(syncRuns)
-      .set({ status: "complete", recordsRead: recordsWritten, finishedAt: nowUtcIso(), updatedAt: nowUtcIso() })
-      .where(eq(syncRuns.id, syncRunId))
-      .run();
-
-    db.update(xeroConnections)
-      .set({ lastSuccessfulCallAt: nowUtcIso(), status: "healthy", updatedAt: nowUtcIso() })
-      .where(eq(xeroConnections.id, route.connectionId))
-      .run();
-
-    await recordAuditEvent({
+    await completeSyncRun({
+      syncRunId,
+      route,
       actorEmail: actor.email,
-      action: "xero_sync.complete",
-      entityId,
-      resourceType: "sync_run",
-      resourceId: syncRunId,
-      detail: { recordsWritten },
+      recordsRead: recordsWritten,
+      detail: { bankSummaryRows: closingBalances.length },
     });
 
     return NextResponse.json({ syncRunId, recordsWritten });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown sync error";
-    db.update(syncRuns)
-      .set({ status: "failed", error: message, finishedAt: nowUtcIso(), updatedAt: nowUtcIso() })
-      .where(eq(syncRuns.id, syncRunId))
-      .run();
-
-    db.update(xeroConnections)
-      .set({ status: "sync_error", updatedAt: nowUtcIso() })
-      .where(eq(xeroConnections.id, route.connectionId))
-      .run();
-
-    await recordAuditEvent({
-      actorEmail: actor.email,
-      action: "xero_sync.failed",
-      entityId,
-      resourceType: "sync_run",
-      resourceId: syncRunId,
-      detail: { error: message },
-    });
-
+    const message = await failSyncRun({ syncRunId, route, actorEmail: actor.email, error: err });
     return NextResponse.json({ error: message, syncRunId }, { status: 502 });
   }
 }
