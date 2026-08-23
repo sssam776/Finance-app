@@ -2,7 +2,7 @@ import { eq, and } from "drizzle-orm";
 import { XeroClient, TokenSet } from "xero-node";
 import { db } from "@/db/client";
 import { entityXeroAppAssignments, xeroConnections, xeroAuthorizations } from "@/db/schema";
-import { resolveXeroAppById, buildXeroClient } from "./appRegistry";
+import { resolveXeroAppById, buildXeroClient, type XeroAppRow } from "./appRegistry";
 import {
   decryptTokenSet,
   deserializeEncryptedPayload,
@@ -70,49 +70,133 @@ export async function resolveXeroRoute(entityId: string, purpose: XeroPurpose): 
   };
 }
 
+/** Refresh this far ahead of expiry so an in-flight call cannot age out mid-request. */
+const REFRESH_SKEW_MS = 60_000;
+
+/** Bounded wait for a peer's refresh: 10 × 200ms. Longer than a refresh, shorter than a user's patience. */
+const PEER_REFRESH_ATTEMPTS = 10;
+const PEER_REFRESH_INTERVAL_MS = 200;
+
+type AuthorizationRow = typeof xeroAuthorizations.$inferSelect;
+
+function loadAuthorization(authorizationId: string): AuthorizationRow {
+  const row = db
+    .select()
+    .from(xeroAuthorizations)
+    .where(eq(xeroAuthorizations.id, authorizationId))
+    .get();
+  if (!row) {
+    throw new Error(`Authorization ${authorizationId} not found`);
+  }
+  return row;
+}
+
+function clientWithStoredTokens(app: XeroAppRow, authorization: AuthorizationRow) {
+  const payload = deserializeEncryptedPayload(authorization.encryptedTokenSet);
+  const tokenSet = new TokenSet(JSON.parse(decryptTokenSet(payload)));
+  const client = buildXeroClient(app);
+  client.setTokenSet(tokenSet);
+  return { client, tokenSet };
+}
+
+function needsRefresh(tokenSet: TokenSet): boolean {
+  return (tokenSet.expires_at ?? 0) * 1000 < Date.now() + REFRESH_SKEW_MS;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * Hydrates a XeroClient with the decrypted, refreshed-if-needed token set
- * for a resolved route. Concurrent-refresh locking (spec 8.5) is a known
- * gap in this quick version — see docs/implementation-plan.md.
+ * Another request won the refresh claim. Poll for the token set it writes
+ * rather than refreshing in parallel — Xero invalidates the previous refresh
+ * token when it issues a new one, so a second concurrent refresh would leave
+ * one of the two callers holding a token that is already dead.
+ */
+async function awaitPeerRefresh(app: XeroAppRow, authorizationId: string): Promise<XeroClient> {
+  for (let attempt = 0; attempt < PEER_REFRESH_ATTEMPTS; attempt += 1) {
+    await sleep(PEER_REFRESH_INTERVAL_MS);
+
+    const fresh = loadAuthorization(authorizationId);
+    if (fresh.lastRefreshError) {
+      throw new Error(`Concurrent token refresh failed: ${fresh.lastRefreshError}`);
+    }
+
+    const { client, tokenSet } = clientWithStoredTokens(app, fresh);
+    if (!needsRefresh(tokenSet)) return client;
+  }
+
+  throw new Error(
+    `Timed out waiting for a concurrent refresh of authorization ${authorizationId} to complete`
+  );
+}
+
+/**
+ * Hydrates a XeroClient with the decrypted, refreshed-if-needed token set for
+ * a resolved route.
+ *
+ * Spec 8.5 concurrency control is a compare-and-swap on `refresh_version`
+ * rather than a Durable Object: exactly one caller can move the version from
+ * N to N+1, so exactly one caller refreshes. The losers wait for that result.
+ * On Cloudflare this becomes the same CAS against D1 — see ADR-002.
  */
 export async function getAuthenticatedClient(
   route: ResolvedXeroRoute
 ): Promise<{ client: XeroClient; tenantId: string }> {
   const app = await resolveXeroAppById(route.xeroAppId);
-  const authorization = db
-    .select()
-    .from(xeroAuthorizations)
-    .where(eq(xeroAuthorizations.id, route.authorizationId))
-    .get();
-  if (!authorization) {
-    throw new Error(`Authorization ${route.authorizationId} not found`);
+  const authorization = loadAuthorization(route.authorizationId);
+  const { client, tokenSet } = clientWithStoredTokens(app, authorization);
+
+  if (!needsRefresh(tokenSet)) {
+    return { client, tenantId: route.tenantId };
   }
 
-  const payload = deserializeEncryptedPayload(authorization.encryptedTokenSet);
-  const tokenSetJson = decryptTokenSet(payload);
-  const tokenSet = new TokenSet(JSON.parse(tokenSetJson));
+  const claim = db
+    .update(xeroAuthorizations)
+    .set({
+      refreshVersion: authorization.refreshVersion + 1,
+      // Cleared as part of the claim so a waiter cannot mistake an error from
+      // an earlier, already-superseded refresh for this attempt's outcome.
+      lastRefreshError: null,
+      updatedAt: nowUtcIso(),
+    })
+    .where(
+      and(
+        eq(xeroAuthorizations.id, authorization.id),
+        eq(xeroAuthorizations.refreshVersion, authorization.refreshVersion)
+      )
+    )
+    .run();
 
-  const client = buildXeroClient(app);
-  client.setTokenSet(tokenSet);
+  if (claim.changes === 0) {
+    return { client: await awaitPeerRefresh(app, authorization.id), tenantId: route.tenantId };
+  }
 
-  const expiresAtMs = (tokenSet.expires_at ?? 0) * 1000;
-  if (expiresAtMs < Date.now() + 60_000) {
+  try {
     const refreshed = await client.refreshToken();
     const now = nowUtcIso();
     const encrypted = encryptTokenSet(JSON.stringify(refreshed), CURRENT_KEY_VERSION);
+
     db.update(xeroAuthorizations)
       .set({
         encryptedTokenSet: serializeEncryptedPayload(encrypted),
         encryptionKeyVersion: CURRENT_KEY_VERSION,
         tokenExpiresAt: new Date((refreshed.expires_at ?? 0) * 1000).toISOString(),
-        refreshVersion: authorization.refreshVersion + 1,
+        // refreshVersion was already advanced by the claim above.
         lastRefreshAt: now,
         lastRefreshError: null,
+        status: "active",
         updatedAt: now,
       })
       .where(eq(xeroAuthorizations.id, authorization.id))
       .run();
-  }
 
-  return { client, tenantId: route.tenantId };
+    return { client, tenantId: route.tenantId };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown refresh error";
+    // Record the failure so waiters fail fast instead of polling to timeout.
+    db.update(xeroAuthorizations)
+      .set({ lastRefreshError: message, status: "error", updatedAt: nowUtcIso() })
+      .where(eq(xeroAuthorizations.id, authorization.id))
+      .run();
+    throw err;
+  }
 }
