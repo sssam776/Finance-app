@@ -48,19 +48,35 @@ Done since the first slice:
 - **CASH-005** configurable variance thresholds and **CASH-006** drill-through
   to the originating bank import and Xero sync run.
 
+- **Per-entity scoping (§14.1).** `entity_permissions` plus the rule in
+  `lib/entityAccess.ts`, enforced on writes as well as reads.
+- **Connection capacity (§7.6.7)** checked before the OAuth consent URL is
+  built, so hitting the five-connection Starter ceiling is a recorded admin
+  decision rather than a Xero error page after consent.
+- **Connection health and staleness (§17.6)** surfaced on `/xero`.
+- **Password rotation** with revocation of the user's other sessions, and
+  **login throttling** counted from the audit trail itself.
+
 Still open in this phase:
 
-- Per-entity permissions (`entity_permissions`) — the current roles are
-  global, so an admin is an admin for all eight entities.
+- The eight seed roles in §31. Only `admin` and `viewer` exist, and §31 says
+  not to build a second identity system without an ADR, so this needs a
+  decision before code.
 - Contacts, invoices, bank transactions, manual journals sync (currently
   only Accounts + Bank Summary are pulled).
-- Connection health dashboard (§17.6) — currently only `status` and
-  `lastSuccessfulCallAt` are stored, not surfaced with staleness warnings.
-- Password self-service: there is no change-password or reset flow yet, so
-  rotating the seeded admin credential means re-seeding against a fresh
-  email or updating the row directly.
-- Rate limiting on `/api/auth/login`. Failed attempts are audited but not
-  throttled.
+- Password reset for a user who has forgotten theirs. Rotation works; there
+  is no out-of-band recovery, so a locked-out user needs an admin to reset
+  the row directly.
+- Scheduled sync. Everything is manually triggered today.
+
+## Module plans
+
+`module-plans.md` holds a concrete implementation plan for Modules B, C, E, F,
+G, H, I, J and K: real table names with real columns, real route paths, the
+Xero scopes and endpoints each needs, what each is blocked on, and an effort
+estimate. Modules D and L are not covered there yet.
+
+Those are plans, not commitments. Nothing described in them exists.
 
 ## Phase 2 — Board and management reporting (Module B, C, D)
 

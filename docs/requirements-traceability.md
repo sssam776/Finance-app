@@ -21,7 +21,9 @@ deliberately deferred — see `implementation-plan.md` for phasing.
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
 | §7.3 | Xero app registry | built (single app) | `xero_apps` table, `db/seed.ts` |
-| §7.6 | Multi-app entity allocation rules | partial | `entity_xero_app_assignments` enforces one active assignment per entity/purpose (`app/api/xero/assignments/route.ts`); only one app exists so multi-app spillover/capacity rules are unexercised |
+| §7.6 | Multi-app entity allocation rules | partial | `entity_xero_app_assignments` enforces one active assignment per entity/purpose (`app/api/xero/assignments/route.ts`); only one app exists so multi-app spillover rules are unexercised |
+| §7.6.7 | Connection capacity checked before OAuth | built | `capacityFailureReason` in `lib/xero/compliance.ts`, called in the OAuth start route before the consent URL is built, so a full app never sends someone to Xero to approve access that cannot be stored. Returns 409 and records an audit event. There is deliberately no spillover to an app with spare room |
+| §17.6 | Connection health and staleness | built | `lib/xero/connectionHealth.ts` plus capacity used/remaining and the last sync run on `app/api/xero/connections/route.ts`, rendered on `/xero`. Terminal statuses outrank staleness, and a future-dated sync is reported as a clock problem |
 | §8.2-8.7 | OAuth flow, state, secret resolution | built | `app/api/xero/apps/[appKey]/oauth/start`, `app/api/xero/oauth/callback`, `lib/xero/appRegistry.ts` |
 | §8.5 | Token-refresh concurrency lock | built | Compare-and-swap on `xero_authorizations.refresh_version` in `lib/xero/gateway.ts` — exactly one caller may move the version from N to N+1, so exactly one caller refreshes; losers wait for that result via `awaitPeerRefresh`. Becomes the same CAS against D1 on Cloudflare (ADR-002), so no Durable Object is required |
 | §8.6 | Token encryption | partial | AES-256-GCM via Node `crypto`, key-version envelope (`lib/xero/crypto.ts`); needs Web Crypto port for Workers |
@@ -35,7 +37,11 @@ deliberately deferred — see `implementation-plan.md` for phasing.
 | §15.1 | Authenticated users | built | `users` table; scrypt password hashing in `lib/auth.ts` (Node stdlib, no native dependency); first admin created by `db/seed.ts` from `ADMIN_EMAIL`/`ADMIN_INITIAL_PASSWORD`, with a generated password printed once and never reset by re-seeding |
 | §15.1 | Sessions | built | `sessions` table keyed by the SHA-256 of the token, so the raw token exists only in the user's httpOnly cookie; 8-hour TTL; disabled users lose access on their next request, not their next login |
 | §15.1 | Actor identity on every write | built | `lib/session.ts::requireSession` — reads take `viewer`, writes take `admin`. No route accepts an actor email from a request body or form field any more; `audit_events.actor_email` is now always the signed-in user |
-| §15.1 | Roles | partial | Two roles (`admin`, `viewer`) gate read vs. write. `entity_permissions` — per-entity scoping, so a user can be admin for one entity and have no access to another — is **not started** |
+| §15.1 | Roles | partial | Two roles (`admin`, `viewer`) gate read vs. write |
+| §14.1 | Per-entity scoping | built | `entity_permissions` table, rule in `lib/entityAccess.ts`, resolved by `lib/session.ts::entityAccessFor`. Explicit grants are authoritative for that user whatever their role; with no grants an admin sees every entity and a viewer sees none. Enforced on writes as well as reads |
+| §15.1 | Password rotation | built | `app/api/auth/password/route.ts` requires the current password and revokes the user's other sessions; policy in `lib/passwordPolicy.ts` |
+| §15.1 | Login throttling | built | `lib/loginThrottle.ts`, counted from `audit_events` so it cannot disagree with the audit trail. Five failures in fifteen minutes returns 429 with `Retry-After` |
+| §31 | Eight seed roles | **not started** | The spec names Finance Controller, Preparer, Reviewer, Board Viewer, Payroll Preparer, Payroll Approver, System Administrator and Service Account. Only `admin` and `viewer` exist. Spec 31 also says not to build a second identity system without an ADR, so expanding this needs a decision first |
 
 **Known limitation:** `middleware.ts` only checks that a session cookie is
 present, because Next.js middleware runs on the Edge runtime and cannot reach

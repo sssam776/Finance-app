@@ -39,20 +39,32 @@ Open http://localhost:3000 and sign in. Pages:
 
 ## Access control
 
-Two roles. `viewer` reads every page; `admin` can additionally import
-statements, map bank accounts, connect Xero organisations, assign connections
-and change variance thresholds. Every write is recorded in `audit_events`
-against the signed-in user — actor identity is never taken from a request
-body or form field.
+Two axes. **Role** decides what you may do: `viewer` reads, `admin` can also
+import statements, map bank accounts, connect Xero organisations, assign
+connections and change variance thresholds. **Entity permissions** decide
+which entities you may do it to.
+
+The scoping rule: an explicit grant is authoritative for that user whatever
+their role, so granting an admin one entity restricts them to it. With no
+grants at all, an admin sees every entity and a viewer sees none. The
+asymmetry is deliberate — a freshly seeded system has one admin and no grants,
+and that admin has to be able to set it up, whereas nobody has yet decided
+what a new viewer should see.
+
+Every write is recorded in `audit_events` against the signed-in user. Actor
+identity is never taken from a request body or form field.
+
+Failed logins are throttled: five in fifteen minutes returns 429 until the
+oldest attempt ages out. Changing your password on `/account` signs out your
+other sessions.
 
 `middleware.ts` redirects signed-out browsers to `/login`, but it is not the
 security boundary: it runs on the Edge runtime and can only see whether a
 cookie exists. Each API route resolves the session itself and rejects a
 forged or expired one.
 
-There is no change-password or reset flow yet, and `/api/auth/login` is
-audited but not rate-limited. Both are tracked in
-`docs/implementation-plan.md`.
+There is no out-of-band password reset: a user who forgets theirs needs an
+admin. Tracked in `docs/implementation-plan.md`.
 
 ## What's real vs. what's a placeholder
 
@@ -72,6 +84,19 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+The unit tests cover the pure rules. The scripts in `scripts/` drive the real
+routes against a running server, which is the only way to check that
+middleware, cookies, roles and entity scoping behave together:
+
+```bash
+npm run dev                                          # in another terminal
+npx tsx scripts/verify-http.ts   <admin-password>    # auth boundary
+npx tsx scripts/verify-cash.ts   <admin-password>    # cash position, add --keep to leave demo data
+npx tsx scripts/verify-access.ts <admin-password>    # entity scoping, rotation, throttling
+```
+
+Each script removes the data it creates.
 
 ## Third-party code
 
