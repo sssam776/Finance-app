@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import { entityXeroAppAssignments, xeroConnections } from "@/db/schema";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession } from "@/lib/session";
 
 /**
  * Enforces spec 7.6.3: no entity may have two active same-purpose
@@ -13,14 +14,17 @@ import { recordAuditEvent } from "@/lib/audit";
  * retires whichever one it supersedes rather than allowing both to stand.
  */
 
+// `createdBy` is deliberately absent: it comes from the session, not the body.
 const createSchema = z.object({
   entityId: z.string().min(1),
   purpose: z.enum(["read_core", "controlled_write", "payroll_draft", "demo", "migration"]),
   connectionId: z.string().min(1),
-  createdBy: z.string().default("unknown@local"),
 });
 
 export async function GET(request: Request) {
+  const actor = await requireSession();
+  if (actor instanceof NextResponse) return actor;
+
   const url = new URL(request.url);
   const entityId = url.searchParams.get("entityId");
   const rows = entityId
@@ -30,12 +34,16 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const body = await request.json();
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { entityId, purpose, connectionId, createdBy } = parsed.data;
+  const { entityId, purpose, connectionId } = parsed.data;
+  const createdBy = actor.email;
 
   const connection = db.select().from(xeroConnections).where(eq(xeroConnections.id, connectionId)).get();
   if (!connection) {

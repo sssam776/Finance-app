@@ -53,7 +53,6 @@ export default function ImportsPage() {
     const form = new FormData();
     form.set("file", file);
     form.set("entityBankAccountId", selectedAccountId);
-    form.set("importedByEmail", "shivanasami2002@gmail.com");
 
     const res = await fetch("/api/imports", { method: "POST", body: form });
     const body = await res.json();

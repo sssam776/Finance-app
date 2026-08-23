@@ -5,10 +5,14 @@ import { xeroOauthStates } from "@/db/schema";
 import { resolveXeroApp, buildXeroClient } from "@/lib/xero/appRegistry";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession } from "@/lib/session";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 
 export async function POST(request: Request, { params }: { params: Promise<{ appKey: string }> }) {
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const { appKey } = await params;
 
   let app;
@@ -19,8 +23,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ app
     return NextResponse.json({ error: message }, { status: 404 });
   }
 
-  const form = await request.formData().catch(() => null);
-  const initiatingUserEmail = (form?.get("initiatingUserEmail") as string) || "unknown@local";
+  // Whoever authorises a Xero organisation is recorded from their session and
+  // carried through the state record into xero_authorizations, so the consent
+  // trail names a real account rather than a posted string.
+  const initiatingUserEmail = actor.email;
 
   const state = nanoid(32);
   const now = new Date();

@@ -7,6 +7,7 @@ import { resolveXeroAppById, buildXeroClient } from "@/lib/xero/appRegistry";
 import { encryptTokenSet, serializeEncryptedPayload, CURRENT_KEY_VERSION } from "@/lib/xero/crypto";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession } from "@/lib/session";
 
 /**
  * The callback resolves the Xero app from the one-time state record created
@@ -14,6 +15,12 @@ import { recordAuditEvent } from "@/lib/audit";
  */
 
 export async function GET(request: Request) {
+  // Xero redirects the browser here as a top-level navigation, so the
+  // SameSite=lax session cookie is sent and this stays enforceable. The
+  // one-time state record is the primary defence; this is the second lock.
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");

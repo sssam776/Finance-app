@@ -7,6 +7,7 @@ import { resolveXeroRoute, getAuthenticatedClient } from "@/lib/xero/gateway";
 import { parseBankSummaryClosingBalances } from "@/lib/xero/reports";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession } from "@/lib/session";
 
 /**
  * Fetches Accounts (reference data) and the Bank Summary report (closing
@@ -17,6 +18,9 @@ import { recordAuditEvent } from "@/lib/audit";
  */
 
 export async function POST(request: Request) {
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const body = await request.json().catch(() => ({}));
   const entityId = body.entityId;
   if (typeof entityId !== "string" || entityId === "") {
@@ -106,7 +110,7 @@ export async function POST(request: Request) {
       .run();
 
     await recordAuditEvent({
-      actorEmail: "system@local",
+      actorEmail: actor.email,
       action: "xero_sync.complete",
       entityId,
       resourceType: "sync_run",
@@ -128,7 +132,7 @@ export async function POST(request: Request) {
       .run();
 
     await recordAuditEvent({
-      actorEmail: "system@local",
+      actorEmail: actor.email,
       action: "xero_sync.failed",
       entityId,
       resourceType: "sync_run",

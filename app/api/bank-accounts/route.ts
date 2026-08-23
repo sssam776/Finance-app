@@ -6,6 +6,7 @@ import { entityBankAccounts } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession } from "@/lib/session";
 
 const createSchema = z.object({
   entityId: z.string().min(1),
@@ -18,6 +19,9 @@ const createSchema = z.object({
 });
 
 export async function GET(request: Request) {
+  const actor = await requireSession();
+  if (actor instanceof NextResponse) return actor;
+
   const url = new URL(request.url);
   const entityId = url.searchParams.get("entityId");
 
@@ -29,6 +33,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const body = await request.json();
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
@@ -54,7 +61,7 @@ export async function POST(request: Request) {
     .run();
 
   await recordAuditEvent({
-    actorEmail: "system@local",
+    actorEmail: actor.email,
     action: "bank_account.created",
     entityId: parsed.data.entityId,
     resourceType: "entity_bank_account",

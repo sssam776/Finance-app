@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/client";
 import { xeroConnections, xeroApps } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { requireSession } from "@/lib/session";
 
 export async function GET() {
+  const actor = await requireSession();
+  if (actor instanceof NextResponse) return actor;
+
   const rows = db
     .select({
       id: xeroConnections.id,

@@ -7,6 +7,7 @@ import { nowUtcIso } from "@/lib/dates";
 import { parseBankCsv, PARSER_VERSION } from "@/lib/csv/parseBankCsv";
 import { storeRawFile } from "@/lib/rawFileStore";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession } from "@/lib/session";
 
 /**
  * Server-side CSV ingestion per REM-002/REM-003: the raw file is stored
@@ -17,6 +18,9 @@ import { recordAuditEvent } from "@/lib/audit";
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 export async function GET(request: Request) {
+  const actor = await requireSession();
+  if (actor instanceof NextResponse) return actor;
+
   const url = new URL(request.url);
   const entityId = url.searchParams.get("entityId");
 
@@ -40,10 +44,14 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const form = await request.formData();
   const file = form.get("file");
   const entityBankAccountId = form.get("entityBankAccountId");
-  const importedByEmail = form.get("importedByEmail") ?? "unknown@local";
+  // Importer identity comes from the session, never the form — see lib/session.ts.
+  const importedByEmail = actor.email;
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Missing file" }, { status: 400 });
@@ -86,7 +94,7 @@ export async function POST(request: Request) {
       sourceFileKey: stored.key,
       sourceFileChecksum: stored.checksum,
       fileReceivedAt: now,
-      importedByEmail: String(importedByEmail),
+      importedByEmail: importedByEmail,
       parserVersion: PARSER_VERSION,
       status: "received",
       createdAt: now,
@@ -118,7 +126,7 @@ export async function POST(request: Request) {
       .run();
 
     await recordAuditEvent({
-      actorEmail: String(importedByEmail),
+      actorEmail: importedByEmail,
       action: "bank_import.parsed",
       entityId: bankAccount.entityId,
       resourceType: "bank_import",
@@ -141,7 +149,7 @@ export async function POST(request: Request) {
       .run();
 
     await recordAuditEvent({
-      actorEmail: String(importedByEmail),
+      actorEmail: importedByEmail,
       action: "bank_import.failed",
       entityId: bankAccount.entityId,
       resourceType: "bank_import",

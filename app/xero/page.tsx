@@ -38,12 +38,7 @@ export default function XeroPage() {
     const res = await fetch("/api/xero/assignments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        entityId,
-        purpose: "read_core",
-        connectionId,
-        createdBy: "shivanasami2002@gmail.com",
-      }),
+      body: JSON.stringify({ entityId, purpose: "read_core", connectionId }),
     });
     const body = await res.json();
     setAssignResult(res.ok ? "Assignment created." : `Error: ${body.error}`);
@@ -60,7 +55,6 @@ export default function XeroPage() {
       </div>
 
       <form action="/api/xero/apps/ramwall_read_core_dev/oauth/start" method="POST">
-        <input type="hidden" name="initiatingUserEmail" value="shivanasami2002@gmail.com" />
         <button type="submit" className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">
           Connect Xero organisation
         </button>
