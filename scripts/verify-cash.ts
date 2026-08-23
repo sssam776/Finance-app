@@ -7,8 +7,11 @@
  * The Xero side is inserted directly rather than synced, so this runs without
  * real Xero credentials. Everything else goes through the real HTTP routes.
  *
- * Run with: npx tsx scripts/verify-cash.ts <admin-password>
- * Cleans up everything it creates.
+ * Run with: npx tsx scripts/verify-cash.ts <admin-password> [--keep]
+ *
+ * Cleans up everything it creates unless --keep is passed, which leaves a
+ * populated dashboard behind so the flagged row and its evidence panel can
+ * actually be looked at.
  */
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
@@ -27,9 +30,10 @@ import { nowUtcIso } from "../lib/dates";
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@ramwall.local";
 const ADMIN_PASSWORD = process.argv[2];
+const KEEP = process.argv.includes("--keep");
 
-if (!ADMIN_PASSWORD) {
-  console.error("Usage: npx tsx scripts/verify-cash.ts <admin-password>");
+if (!ADMIN_PASSWORD || ADMIN_PASSWORD.startsWith("--")) {
+  console.error("Usage: npx tsx scripts/verify-cash.ts <admin-password> [--keep]");
   process.exit(1);
 }
 
@@ -111,6 +115,8 @@ async function main() {
   form.set("entityBankAccountId", bankAccountId);
   const upload = await call("/api/imports", { method: "POST", body: form });
   const uploadBody = (await upload.json()) as {
+    importId: string;
+    snapshotId: string;
     rowsParsed: number;
     closingBalance: string;
     balanceDate: string;
@@ -194,18 +200,38 @@ async function main() {
   check("  entity override beats the group default", row?.threshold?.scope, "entity");
   check("  flagged again under the tighter override", row?.isException, true);
 
-  console.log("\n--- cleanup ---");
-  db.delete(bankBalanceSnapshots).where(eq(bankBalanceSnapshots.entityBankAccountId, bankAccountId)).run();
-  db.delete(bankImports).where(eq(bankImports.entityId, entity.id)).run();
-  db.delete(xeroAccounts).where(eq(xeroAccounts.id, xeroAccountRowId)).run();
-  db.delete(syncRuns).where(eq(syncRuns.id, syncRunId)).run();
-  db.delete(entityBankAccounts).where(eq(entityBankAccounts.id, bankAccountId)).run();
-  db.delete(varianceThresholds).where(eq(varianceThresholds.entityId, entity.id)).run();
-  db.update(varianceThresholds)
-    .set({ absoluteAmount: "1000.00", percent: "1.00", updatedAt: nowUtcIso() })
-    .where(eq(varianceThresholds.entityId, "*"))
-    .run();
-  console.log("      test data removed, group threshold restored to 1000.00 / 1.00%");
+  if (KEEP) {
+    // Drop the tight entity override so the row is flagged by the group
+    // default instead, which is the configuration a reviewer should see.
+    db.delete(varianceThresholds).where(eq(varianceThresholds.entityId, entity.id)).run();
+    db.update(varianceThresholds)
+      .set({ absoluteAmount: "1000.00", percent: "1.00", updatedAt: nowUtcIso() })
+      .where(eq(varianceThresholds.entityId, "*"))
+      .run();
+
+    console.log("\n--- left in place for review (--keep) ---");
+    console.log(`      entity          ${entity.shortCode}`);
+    console.log(`      bank balance    8750.50 as at 2026-08-22`);
+    console.log(`      xero balance    8500.00`);
+    console.log(`      variance        250.50 (2.95%), flagged by the 1.00% group trigger`);
+    console.log(`\n      Open ${BASE}, sign in, and expand the row's "Evidence" link.`);
+    console.log(`      Re-run without --keep to remove this data.`);
+  } else {
+    console.log("\n--- cleanup ---");
+    // By id, not by entity: deleting this entity's imports wholesale would
+    // take real ones with it.
+    db.delete(bankBalanceSnapshots).where(eq(bankBalanceSnapshots.id, uploadBody.snapshotId)).run();
+    db.delete(bankImports).where(eq(bankImports.id, uploadBody.importId)).run();
+    db.delete(xeroAccounts).where(eq(xeroAccounts.id, xeroAccountRowId)).run();
+    db.delete(syncRuns).where(eq(syncRuns.id, syncRunId)).run();
+    db.delete(entityBankAccounts).where(eq(entityBankAccounts.id, bankAccountId)).run();
+    db.delete(varianceThresholds).where(eq(varianceThresholds.entityId, entity.id)).run();
+    db.update(varianceThresholds)
+      .set({ absoluteAmount: "1000.00", percent: "1.00", updatedAt: nowUtcIso() })
+      .where(eq(varianceThresholds.entityId, "*"))
+      .run();
+    console.log("      test data removed, group threshold restored to 1000.00 / 1.00%");
+  }
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
