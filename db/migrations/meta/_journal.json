@@ -43,6 +43,13 @@
       "when": 1787569802613,
       "tag": "0005_dark_the_liberteens",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787572550464,
+      "tag": "0006_premium_wild_child",
+      "breakpoints": true
     }
   ]
 }

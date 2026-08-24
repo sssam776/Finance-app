@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   PageHeading,
   Panel,
@@ -9,6 +9,8 @@ import {
   Th,
   Field,
   Select,
+  Button,
+  Input,
   StatusPill,
   Notice,
   EmptyRow,
@@ -76,6 +78,10 @@ export default function VariancePage() {
   const [comparison, setComparison] = useState("prior_month");
   const [data, setData] = useState<VarianceResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     fetch("/api/entities")
@@ -85,7 +91,49 @@ export default function VariancePage() {
         if (d.entities?.[0]) setEntityId(d.entities[0].id);
       })
       .catch(() => setEntities([]));
+
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setIsAdmin(d?.user?.role === "admin"))
+      .catch(() => setIsAdmin(false));
   }, []);
+
+  /**
+   * Pulls the twelve months ending with the selected period, so the chosen
+   * month and every comparison it offers land in one snapshot. Fetching only
+   * the selected month would leave the comparative period uncovered, which the
+   * read route correctly refuses to compare.
+   */
+  async function syncPl() {
+    if (!entityId || !period) return;
+    setSyncing(true);
+    setSyncResult(null);
+
+    const [year, month] = period.split("-").map(Number);
+    const periodEnd = new Date(Date.UTC(year!, month!, 0)).toISOString().slice(0, 10);
+
+    const res = await fetch("/api/xero/sync/pl", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entityId, periodEnd, periods: 12 }),
+    });
+    const body = await res.json().catch(() => ({}));
+
+    setSyncResult(
+      res.ok
+        ? {
+            ok: true,
+            text:
+              `Synced ${body.rowsWritten} rows.` +
+              (body.unresolvedColumns?.length
+                ? ` ${body.unresolvedColumns.length} column(s) could not be dated and were skipped.`
+                : ""),
+          }
+        : { ok: false, text: body.error ?? "The sync failed." }
+    );
+    setSyncing(false);
+    setReloadKey((k) => k + 1);
+  }
 
   useEffect(() => {
     if (!entityId || !period) return;
@@ -112,7 +160,7 @@ export default function VariancePage() {
       });
 
     return () => controller.abort();
-  }, [entityId, period, comparison]);
+  }, [entityId, period, comparison, reloadKey]);
 
   return (
     <div className="space-y-6">
@@ -150,6 +198,22 @@ export default function VariancePage() {
             </Select>
           </Field>
         </div>
+
+        {isAdmin && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+            <Button variant="secondary" onClick={syncPl} disabled={syncing || !entityId}>
+              {syncing ? "Syncing…" : "Sync P&L from Xero"}
+            </Button>
+            <span className="text-xs text-slate-400">
+              Pulls the twelve months ending with the selected period.
+            </span>
+          </div>
+        )}
+        {syncResult && (
+          <div className="mt-3">
+            <Notice tone={syncResult.ok ? "ok" : "error"}>{syncResult.text}</Notice>
+          </div>
+        )}
       </Panel>
 
       {loading && <p className="text-sm text-slate-500">Loading…</p>}
@@ -252,6 +316,13 @@ export default function VariancePage() {
             </tbody>
           </TableFrame>
 
+          <CommentaryPanel
+            entityId={entityId}
+            period={period}
+            comparison={comparison}
+            isAdmin={isAdmin}
+          />
+
           {data.evidence && (
             <Panel title="Source">
               <dl className="grid gap-1 text-xs sm:grid-cols-2">
@@ -274,6 +345,126 @@ export default function VariancePage() {
         </>
       )}
     </div>
+  );
+}
+
+interface CommentaryRow {
+  id: string;
+  accountKey: string;
+  body: string;
+  authorEmail: string;
+  origin: string;
+  status: string;
+  updatedAt: string;
+}
+
+/**
+ * VAR-004. Deliberately its own component fetching its own endpoint: the
+ * figures above are never re-read or recalculated when a comment is saved,
+ * which is what keeps an explanation from being able to move a number.
+ */
+function CommentaryPanel({
+  entityId,
+  period,
+  comparison,
+  isAdmin,
+}: {
+  entityId: string;
+  period: string;
+  comparison: string;
+  isAdmin: boolean;
+}) {
+  const [rows, setRows] = useState<CommentaryRow[]>([]);
+  const [accountKey, setAccountKey] = useState("*");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = useCallback(() => {
+    if (!entityId || !period) return;
+    fetch(`/api/pl-variance/commentary?entityId=${entityId}&period=${period}`)
+      .then((r) => (r.ok ? r.json() : { commentary: [] }))
+      .then((d) => setRows(d.commentary ?? []))
+      .catch(() => setRows([]));
+  }, [entityId, period]);
+
+  useEffect(load, [load]);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMessage(null);
+
+    const res = await fetch("/api/pl-variance/commentary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entityId, period, comparison, accountKey: accountKey || "*", body }),
+    });
+    const result = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      setMessage({
+        ok: true,
+        text: result.supersededPrevious
+          ? "Saved. The previous explanation for this account was superseded."
+          : "Saved.",
+      });
+      setBody("");
+      load();
+    } else {
+      setMessage({ ok: false, text: result.error?.formErrors?.[0] ?? "Could not save." });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <Panel
+      title="Explanations"
+      description="Why these movements happened. Kept apart from the figures, and never read when they are calculated."
+    >
+      {rows.length === 0 && <p className="text-sm text-slate-400">Nothing recorded for this period.</p>}
+
+      <ul className="space-y-3">
+        {rows.map((row) => (
+          <li key={row.id} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-medium text-slate-700">
+                {row.accountKey === "*" ? "Whole entity" : row.accountKey}
+              </span>
+              <StatusPill tone={row.status === "final" ? "healthy" : "neutral"}>
+                {row.status}
+              </StatusPill>
+              {row.origin === "ai" && <StatusPill tone="stale">AI drafted</StatusPill>}
+            </div>
+            <p className="mt-1 max-w-prose text-sm text-slate-700">{row.body}</p>
+            <p className="mt-1 text-xs text-slate-400">
+              {row.authorEmail} · {row.updatedAt.slice(0, 16).replace("T", " ")}
+            </p>
+          </li>
+        ))}
+      </ul>
+
+      {isAdmin && (
+        <form onSubmit={save} className="mt-4 space-y-3 border-t border-slate-200 pt-4">
+          <Field label="Account" hint="or leave as * for the whole entity">
+            <Input value={accountKey} onChange={(e) => setAccountKey(e.target.value)} />
+          </Field>
+          <Field label="Explanation">
+            <textarea
+              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900"
+              rows={3}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              required
+            />
+          </Field>
+          <Button type="submit" disabled={busy || body.trim() === ""}>
+            {busy ? "Saving…" : "Save explanation"}
+          </Button>
+          {message && <Notice tone={message.ok ? "ok" : "error"}>{message.text}</Notice>}
+        </form>
+      )}
+    </Panel>
   );
 }
 

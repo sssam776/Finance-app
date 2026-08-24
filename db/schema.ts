@@ -404,6 +404,53 @@ export const reportRows = sqliteTable(
   })
 );
 
+/**
+ * VAR-004: why a figure moved, in a person's words.
+ *
+ * Its own table, and nothing on the calculation path reads it. The variance
+ * route returns commentary under a separate key from the figures so that no
+ * amount of editing here can change a number there. `citedRowIds` records
+ * which rows the explanation was written against, so a comment can be shown
+ * as stale once those rows are superseded rather than quietly describing
+ * figures that have since moved.
+ */
+export const varianceCommentary = sqliteTable(
+  "variance_commentary",
+  {
+    id: id(),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id),
+    /** `YYYY-MM`. */
+    period: text("period").notNull(),
+    comparison: text("comparison", {
+      enum: ["prior_month", "prior_year_month", "prior_year_ytd", "budget", "custom"],
+    }).notNull(),
+    /** An account name, or the literal "*" for a whole-entity narrative. */
+    accountKey: text("account_key").notNull(),
+    origin: text("origin", { enum: ["user", "ai"] })
+      .notNull()
+      .default("user"),
+    body: text("body").notNull(),
+    /** JSON array of report_rows ids the explanation was written against. */
+    citedRowIds: text("cited_row_ids"),
+    authorEmail: text("author_email").notNull(),
+    status: text("status", { enum: ["draft", "final", "superseded"] })
+      .notNull()
+      .default("draft"),
+    ...timestamps(),
+  },
+  (t) => ({
+    varianceCommentaryLookupIdx: index("variance_commentary_lookup_idx").on(
+      t.entityId,
+      t.period,
+      t.accountKey
+    ),
+  })
+);
+
+export const WHOLE_ENTITY_COMMENTARY = "*";
+
 // ---------------------------------------------------------------------------
 // 15.1 Identity and access
 // ---------------------------------------------------------------------------

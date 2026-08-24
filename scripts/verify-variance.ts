@@ -11,7 +11,7 @@
 import { nanoid } from "nanoid";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client";
-import { entities, reportSnapshots, reportRows, syncRuns } from "../db/schema";
+import { entities, reportSnapshots, reportRows, syncRuns, varianceCommentary } from "../db/schema";
 import { nowUtcIso } from "../lib/dates";
 import { assertLocalDevDatabase, adminPassword } from "./guardTestDb";
 
@@ -258,7 +258,76 @@ async function main() {
   check("  reports unavailable", emptyBody.available, false);
   check("  explains why", emptyBody.reason.length > 20, true);
 
+  console.log("\n--- commentary is separate from the figures (VAR-004) ---");
+  const post = (payload: unknown) =>
+    fetch(BASE + "/api/pl-variance/commentary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie },
+      body: JSON.stringify(payload),
+    });
+
+  const created = await post({
+    entityId: entity.id,
+    period: PERIOD,
+    comparison: "prior_month",
+    accountKey: "Verify Rent",
+    body: "Landlord review took effect in July.",
+  });
+  check("  POST commentary", created.status, 201);
+
+  const listed = await call(`/api/pl-variance/commentary?entityId=${entity.id}&period=${PERIOD}`);
+  const listedBody = (await listed.json()) as { commentary: { body: string; authorEmail: string }[] };
+  check("  appears in the list", listedBody.commentary.length, 1);
+  check("  author comes from the session", listedBody.commentary[0]?.authorEmail, ADMIN_EMAIL);
+
+  // The whole point of VAR-004: an explanation must not be able to move a
+  // number. Re-read the figures and confirm they are byte-identical.
+  const after = await call(
+    `/api/pl-variance?entityId=${entity.id}&period=${PERIOD}&comparison=prior_month`
+  );
+  const afterBody = (await after.json()) as { rows: Row[] };
+  const rentBefore = byName.get("Verify Rent")!.movement;
+  const rentAfter = afterBody.rows.find((r) => r.accountName === "Verify Rent")?.movement;
+  check("  figures unchanged by commentary", rentAfter, rentBefore);
+
+  const superseded = await post({
+    entityId: entity.id,
+    period: PERIOD,
+    comparison: "prior_month",
+    accountKey: "Verify Rent",
+    body: "Corrected: the increase is a one-off arrears catch-up.",
+  });
+  const supersededBody = (await superseded.json()) as { supersededPrevious: number };
+  check("  a second explanation supersedes the first", supersededBody.supersededPrevious, 1);
+
+  const afterSupersede = await call(
+    `/api/pl-variance/commentary?entityId=${entity.id}&period=${PERIOD}`
+  );
+  const afterList = (await afterSupersede.json()) as { commentary: unknown[] };
+  check("  only the current one is listed", afterList.commentary.length, 1);
+
+  const aiNoCitation = await post({
+    entityId: entity.id,
+    period: PERIOD,
+    comparison: "prior_month",
+    accountKey: "*",
+    body: "Costs rose broadly.",
+    origin: "ai",
+    citedRowIds: [],
+  });
+  check("  AI commentary without citations is refused", aiNoCitation.status, 400);
+
+  const emptyBody2 = await post({
+    entityId: entity.id,
+    period: PERIOD,
+    comparison: "prior_month",
+    accountKey: "*",
+    body: "   ",
+  });
+  check("  empty explanation is refused", emptyBody2.status, 400);
+
   console.log("\n--- cleanup ---");
+  db.delete(varianceCommentary).where(eq(varianceCommentary.entityId, entity.id)).run();
   cleanup(entity.id, snapshotId, syncRunId);
   console.log("      fixture removed");
 
