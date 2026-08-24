@@ -50,6 +50,13 @@
       "when": 1787572550464,
       "tag": "0006_premium_wild_child",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787574484450,
+      "tag": "0007_tough_the_enforcers",
+      "breakpoints": true
     }
   ]
 }

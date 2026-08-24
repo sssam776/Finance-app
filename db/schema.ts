@@ -404,6 +404,149 @@ export const reportRows = sqliteTable(
   })
 );
 
+// ---------------------------------------------------------------------------
+// 14.9 Balance-sheet reconciliation (Module D)
+// ---------------------------------------------------------------------------
+
+/**
+ * BS-001: the close state for one entity and one period.
+ *
+ * Its own table rather than a column on each workpaper, because locking has to
+ * be one atomic fact with one owner and one place to pin the trial balance it
+ * was locked against. Spread across N rows there is no single source of truth,
+ * and a reopen has nowhere to record its reason.
+ */
+export const reconciliationPeriods = sqliteTable(
+  "reconciliation_periods",
+  {
+    id: id(),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id),
+    /** Date-only period end. */
+    periodEnd: text("period_end").notNull(),
+    status: text("status", { enum: ["open", "in_review", "locked"] })
+      .notNull()
+      .default("open"),
+    /** The trial balance this period is reconciled against. Pinned, not re-read. */
+    tbSnapshotId: text("tb_snapshot_id")
+      .notNull()
+      .references(() => reportSnapshots.id),
+    lockedByEmail: text("locked_by_email"),
+    lockedAt: text("locked_at"),
+    /**
+     * Set only when an admin locks over material accounts that are not
+     * settled. Recorded so a close that skipped its own gate is visible
+     * afterwards rather than indistinguishable from a clean one.
+     */
+    lockAcknowledgedUnresolved: integer("lock_acknowledged_unresolved", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    reopenedByEmail: text("reopened_by_email"),
+    reopenedAt: text("reopened_at"),
+    reopenReason: text("reopen_reason"),
+    ...timestamps(),
+  },
+  (t) => ({
+    reconciliationPeriodUnique: uniqueIndex("reconciliation_periods_unique").on(
+      t.entityId,
+      t.periodEnd
+    ),
+  })
+);
+
+/**
+ * BS-001 in one row: the trial balance figure, what supports it, the
+ * difference, and who prepared and reviewed it.
+ *
+ * `substantiatedAmount` and `difference` are stored at preparation time rather
+ * than recomputed on read. A live recomputation would let a later bank import
+ * silently change a workpaper somebody already signed off.
+ */
+export const reconciliationWorkpapers = sqliteTable(
+  "reconciliation_workpapers",
+  {
+    id: id(),
+    periodId: text("period_id")
+      .notNull()
+      .references(() => reconciliationPeriods.id),
+    /** Denormalised so entity-access filtering happens before a row is built. */
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id),
+
+    accountCode: text("account_code").notNull(),
+    accountName: text("account_name").notNull(),
+    xeroAccountId: text("xero_account_id"),
+    /** Points at the exact trial balance line this came from. */
+    tbRowId: text("tb_row_id").references(() => reportRows.id),
+    tbAmount: text("tb_amount").notNull(),
+
+    substantiationType: text("substantiation_type", {
+      enum: [
+        "bank_balance",
+        "intercompany",
+        "aged_receivables",
+        "aged_payables",
+        "gst_control",
+        "loan_register",
+        "wip_schedule",
+        "fixed_assets",
+        "manual_schedule",
+        "none",
+      ],
+    })
+      .notNull()
+      .default("none"),
+    /** Null means nothing has substantiated this. Never conflate with zero. */
+    substantiatedAmount: text("substantiated_amount"),
+    substantiationSourceRef: text("substantiation_source_ref"),
+    substantiationAvailability: text("substantiation_availability", {
+      enum: ["available", "partial", "unavailable", "counterparty_unavailable"],
+    })
+      .notNull()
+      .default("unavailable"),
+
+    difference: text("difference"),
+    currency: text("currency").notNull().default("NZD"),
+
+    status: text("status", {
+      enum: [
+        "not_started",
+        "in_progress",
+        "reconciled",
+        "reconciled_with_timing_difference",
+        "unresolved",
+        "unsubstantiated",
+        "partial",
+        "reviewed",
+        "locked",
+      ],
+    })
+      .notNull()
+      .default("not_started"),
+    isMaterial: integer("is_material", { mode: "boolean" }).notNull().default(false),
+    timingDifferenceNote: text("timing_difference_note"),
+
+    preparerEmail: text("preparer_email"),
+    preparedAt: text("prepared_at"),
+    reviewerEmail: text("reviewer_email"),
+    reviewedAt: text("reviewed_at"),
+    note: text("note"),
+    ...timestamps(),
+  },
+  (t) => ({
+    workpaperPeriodAccountUnique: uniqueIndex("reconciliation_workpapers_unique").on(
+      t.periodId,
+      t.accountCode
+    ),
+    workpaperEntityStatusIdx: index("reconciliation_workpapers_entity_status_idx").on(
+      t.entityId,
+      t.status
+    ),
+  })
+);
+
 /**
  * VAR-004: why a figure moved, in a person's words.
  *
