@@ -45,8 +45,10 @@ export function AppHeader() {
           Ramwall Finance Control
         </Link>
 
-        <div className="flex items-center gap-5">
-          <nav className="flex gap-4 text-sm">
+        {/* Wraps as a unit. Without this the nav wrapped but the user block
+            kept its place on the line and ran off the right edge at 390px. */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
             {NAV_ITEMS.map((item) => {
               const active = pathname === item.href;
               return (
@@ -67,7 +69,7 @@ export function AppHeader() {
           </nav>
 
           {me && (
-            <div className="flex items-center gap-3 border-l border-slate-200 pl-5 text-sm">
+            <div className="flex items-center gap-3 text-sm sm:border-l sm:border-slate-200 sm:pl-5">
               <Link href="/account" className="rounded leading-tight hover:opacity-80">
                 <span className="text-slate-700">{me.displayName}</span>
                 <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">

@@ -1,6 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  PageHeading,
+  Panel,
+  TableFrame,
+  Thead,
+  Th,
+  Button,
+  Field,
+  Input,
+  Select,
+  StatusPill,
+  Notice,
+  EmptyRow,
+} from "../ui";
 
 interface BankAccount {
   id: string;
@@ -30,7 +44,7 @@ export default function ImportsPage() {
   const [imports, setImports] = useState<ImportRow[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   function reload() {
@@ -50,6 +64,7 @@ export default function ImportsPage() {
     if (!file || !selectedAccountId) return;
     setBusy(true);
     setResult(null);
+
     const form = new FormData();
     form.set("file", file);
     form.set("entityBankAccountId", selectedAccountId);
@@ -58,8 +73,11 @@ export default function ImportsPage() {
     const body = await res.json();
     setResult(
       res.ok
-        ? `Parsed ${body.rowsParsed} rows — closing balance $${body.closingBalance} as at ${body.balanceDate}`
-        : `Error: ${body.error}`
+        ? {
+            ok: true,
+            text: `Parsed ${body.rowsParsed} rows. Closing balance ${body.closingBalance} as at ${body.balanceDate}.`,
+          }
+        : { ok: false, text: body.error ?? "The file could not be parsed." }
     );
     setBusy(false);
     reload();
@@ -67,80 +85,80 @@ export default function ImportsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Bank Imports</h1>
-        <p className="text-sm text-slate-500">
-          ASB/BNZ CSV export with a running balance column. Server-side parsing only (REM-002/REM-003).
-        </p>
-      </div>
+      <PageHeading title="Bank Imports">
+        An ASB or BNZ CSV export with the running balance column included. Parsing happens on the
+        server, and the original file is kept so a figure can always be traced back to it.
+      </PageHeading>
 
-      <form onSubmit={handleUpload} className="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
-        <select
-          className="w-full rounded border border-slate-300 px-2 py-1.5"
-          value={selectedAccountId}
-          onChange={(e) => setSelectedAccountId(e.target.value)}
-          required
-        >
-          <option value="">Select bank account…</option>
-          {bankAccounts.map((b) => (
-            <option key={b.id} value={b.id}>
-              {entityLabel(b.entityId)} — {b.bankName} {b.accountName}
-            </option>
-          ))}
-        </select>
-        <input
-          type="file"
-          accept=".csv"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm"
-          required
-        />
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          {busy ? "Uploading…" : "Upload and parse"}
-        </button>
-        {result && <p className="text-sm text-slate-600">{result}</p>}
-      </form>
+      <Panel title="Upload a statement">
+        <form onSubmit={handleUpload} className="space-y-3">
+          <Field label="Bank account">
+            <Select
+              value={selectedAccountId}
+              onChange={(e) => setSelectedAccountId(e.target.value)}
+              required
+            >
+              <option value="">Select bank account…</option>
+              {bankAccounts.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {entityLabel(b.entityId)} — {b.bankName} {b.accountName}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Entity</th>
-              <th className="px-4 py-3">Bank</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Received</th>
-              <th className="px-4 py-3">Error</th>
+          <Field label="CSV file" hint="must include a balance column">
+            <Input
+              type="file"
+              accept=".csv"
+              onChange={(e) => setFile((e.target as HTMLInputElement).files?.[0] ?? null)}
+              required
+            />
+          </Field>
+
+          <Button type="submit" disabled={busy}>
+            {busy ? "Uploading…" : "Upload and parse"}
+          </Button>
+
+          {result && <Notice tone={result.ok ? "ok" : "error"}>{result.text}</Notice>}
+        </form>
+      </Panel>
+
+      <TableFrame>
+        <Thead>
+          <tr>
+            <Th>Entity</Th>
+            <Th>Bank</Th>
+            <Th>Status</Th>
+            <Th>Received</Th>
+            <Th>Error</Th>
+          </tr>
+        </Thead>
+        <tbody>
+          {imports.map((row) => (
+            <tr key={row.id} className="border-t border-slate-100">
+              <td className="px-4 py-3 text-slate-900">{entityLabel(row.entityId)}</td>
+              <td className="px-4 py-3 text-slate-700">{row.bankName}</td>
+              <td className="px-4 py-3">
+                <StatusPill
+                  tone={
+                    row.status === "parsed" ? "healthy" : row.status === "failed" ? "exception" : "neutral"
+                  }
+                >
+                  {row.status}
+                </StatusPill>
+              </td>
+              <td className="figures whitespace-nowrap px-4 py-3 text-slate-500">
+                {row.fileReceivedAt}
+              </td>
+              <td className="max-w-md px-4 py-3 text-exception">{row.error ?? ""}</td>
             </tr>
-          </thead>
-          <tbody>
-            {imports.map((row) => (
-              <tr key={row.id} className="border-t border-slate-100">
-                <td className="px-4 py-3">{entityLabel(row.entityId)}</td>
-                <td className="px-4 py-3">{row.bankName}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={
-                      row.status === "parsed"
-                        ? "text-emerald-600"
-                        : row.status === "failed"
-                          ? "text-red-600"
-                          : "text-slate-500"
-                    }
-                  >
-                    {row.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-slate-500">{row.fileReceivedAt}</td>
-                <td className="px-4 py-3 text-red-500">{row.error ?? ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+          {imports.length === 0 && (
+            <EmptyRow colSpan={5}>No statements imported yet.</EmptyRow>
+          )}
+        </tbody>
+      </TableFrame>
     </div>
   );
 }

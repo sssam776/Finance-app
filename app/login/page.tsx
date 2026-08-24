@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button, Field, Input, Notice } from "../ui";
 
 /**
  * Read from `window.location` rather than `useSearchParams` so this page does
@@ -42,44 +43,41 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm py-16">
-      <h1 className="text-2xl font-semibold">Sign in</h1>
-      <p className="mt-1 text-sm text-slate-500">Ramwall Finance Control</p>
+    <div className="mx-auto max-w-sm py-24">
+      <h1 className="text-2xl font-semibold tracking-[-0.02em] text-slate-900">
+        Ramwall Finance Control
+      </h1>
+      <p className="mt-1 text-sm text-slate-500">Sign in to continue.</p>
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-3 rounded-lg border border-slate-200 bg-white p-5">
-        <label className="block text-sm">
-          <span className="text-slate-600">Email</span>
-          <input
+      <form
+        onSubmit={handleSubmit}
+        className="mt-6 space-y-4 rounded border border-slate-200 bg-white p-6 shadow-panel"
+      >
+        <Field label="Email">
+          <Input
             type="email"
             autoComplete="username"
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-        </label>
+        </Field>
 
-        <label className="block text-sm">
-          <span className="text-slate-600">Password</span>
-          <input
+        <Field label="Password">
+          <Input
             type="password"
             autoComplete="current-password"
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-        </label>
+        </Field>
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700 disabled:opacity-50"
-        >
+        <Button type="submit" disabled={busy} className="w-full">
           {busy ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <Notice tone="error">{error}</Notice>}
       </form>
     </div>
   );

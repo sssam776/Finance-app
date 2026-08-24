@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MIN_PASSWORD_LENGTH } from "@/lib/passwordPolicy";
+import { PageHeading, Panel, Button, Field, Input, Notice, StatusPill } from "../ui";
 
 interface Me {
   email: string;
@@ -65,71 +66,56 @@ export default function AccountPage() {
 
   return (
     <div className="max-w-md space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Account</h1>
+      <PageHeading title="Account">
         {me && (
-          <p className="text-sm text-slate-500">
-            {me.displayName} ({me.email}) — {me.role}
-          </p>
+          <>
+            {me.displayName} · {me.email} <StatusPill tone="neutral">{me.role}</StatusPill>
+          </>
         )}
-      </div>
+      </PageHeading>
 
-      <form onSubmit={changePassword} className="space-y-3 rounded-lg border border-slate-200 bg-white p-5">
-        <div>
-          <h2 className="text-sm font-medium">Change password</h2>
-          <p className="text-xs text-slate-500">
-            At least {MIN_PASSWORD_LENGTH} characters. Changing it signs out your other sessions.
-          </p>
-        </div>
+      <Panel
+        title="Change password"
+        description={`At least ${MIN_PASSWORD_LENGTH} characters. Changing it signs out your other sessions.`}
+      >
+        <form onSubmit={changePassword} className="space-y-4">
+          <Field label="Current password">
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+            />
+          </Field>
 
-        <label className="block text-sm">
-          <span className="text-slate-600">Current password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            required
-          />
-        </label>
+          <Field label="New password">
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+            />
+          </Field>
 
-        <label className="block text-sm">
-          <span className="text-slate-600">New password</span>
-          <input
-            type="password"
-            autoComplete="new-password"
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            required
-          />
-        </label>
+          <Field label="Confirm new password">
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </Field>
 
-        <label className="block text-sm">
-          <span className="text-slate-600">Confirm new password</span>
-          <input
-            type="password"
-            autoComplete="new-password"
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-          />
-        </label>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Changing…" : "Change password"}
+          </Button>
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          {busy ? "Changing…" : "Change password"}
-        </button>
-
-        {message && (
-          <p className={`text-sm ${message.ok ? "text-emerald-600" : "text-red-600"}`}>{message.text}</p>
-        )}
-      </form>
+          {message && <Notice tone={message.ok ? "ok" : "error"}>{message.text}</Notice>}
+        </form>
+      </Panel>
     </div>
   );
 }

@@ -1,6 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  PageHeading,
+  TableFrame,
+  Thead,
+  Th,
+  Button,
+  Select,
+  StatusPill,
+  Notice,
+  EmptyRow,
+} from "../ui";
 
 interface ConnectionHealth {
   level: "ok" | "warning" | "error";
@@ -83,52 +94,48 @@ export default function XeroPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Xero Connections</h1>
-        <p className="text-sm text-slate-500">
-          One development Starter app is seeded (read-only scopes). Connect it to the Xero Demo
-          Company or a real organisation, then assign the resulting connection to an entity.
-        </p>
-      </div>
+      <PageHeading title="Xero Connections">
+        One development Starter app is seeded with read-only scopes. Connect it to the Xero Demo
+        Company or a real organisation, then assign the resulting connection to an entity.
+      </PageHeading>
 
       {connections.length > 0 && (
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-          <span className="text-slate-500">Connection capacity: </span>
-          <span className="font-medium">
-            {connections[0]!.capacity.used} of {connections[0]!.capacity.limit} used
+        <div className="rounded border border-slate-200 bg-white px-4 py-3 text-sm shadow-panel">
+          <span className="text-slate-500">Connection capacity </span>
+          <span className="figures font-medium text-slate-900">
+            {connections[0]!.capacity.used} of {connections[0]!.capacity.limit}
           </span>
           <span className="text-slate-400"> on the {connections[0]!.appTier} tier</span>
           {connections[0]!.capacity.remaining === 0 && (
-            <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-              full — connecting another organisation needs a tier decision
+            <span className="ml-2">
+              <StatusPill tone="stale">
+                full, connecting another organisation needs a tier decision
+              </StatusPill>
             </span>
           )}
         </div>
       )}
 
-      <form onSubmit={connect}>
-        <button type="submit" className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">
-          Connect Xero organisation
-        </button>
-      </form>
-      {connectError && (
-        <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{connectError}</p>
-      )}
-      <p className="text-xs text-slate-400">
-        Requires XERO_RAMWALL_READ_CORE_DEV_CLIENT_ID / _CLIENT_SECRET and XERO_TOKEN_ENCRYPTION_KEY_V1
-        to be set — see .env.example.
-      </p>
+      <div className="space-y-3">
+        <form onSubmit={connect}>
+          <Button type="submit">Connect Xero organisation</Button>
+        </form>
+        {connectError && <Notice tone="error">{connectError}</Notice>}
+        <p className="max-w-prose text-xs text-slate-400">
+          Requires XERO_RAMWALL_READ_CORE_DEV_CLIENT_ID, _CLIENT_SECRET and
+          XERO_TOKEN_ENCRYPTION_KEY_V1 to be set. See .env.example.
+        </p>
+      </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">App</th>
-              <th className="px-4 py-3">Organisation</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Assign to entity (read_core)</th>
-            </tr>
-          </thead>
+      <TableFrame>
+        <Thead>
+          <tr>
+            <Th>App</Th>
+            <Th>Organisation</Th>
+            <Th>Status</Th>
+            <Th>Assign to entity</Th>
+          </tr>
+        </Thead>
           <tbody>
             {connections.map((c) => (
               <tr key={c.id} className="border-t border-slate-100">
@@ -140,20 +147,23 @@ export default function XeroPage() {
                   {c.xeroOrganisationName}
                   <div className="text-xs text-slate-400 font-mono">{c.xeroTenantId}</div>
                 </td>
-                <td className="px-4 py-3">
-                  <div
-                    className={
+                <td className="px-4 py-3 align-top">
+                  {/* The status word carries the state, the pill's tone only
+                      reinforces it. Health is the reason a stale figure looks
+                      current, so it is never colour alone. */}
+                  <StatusPill
+                    tone={
                       c.health.level === "error"
-                        ? "text-red-600"
+                        ? "exception"
                         : c.health.level === "warning"
-                          ? "text-amber-600"
-                          : "text-emerald-600"
+                          ? "stale"
+                          : "healthy"
                     }
                   >
                     {c.status}
-                  </div>
+                  </StatusPill>
                   {c.health.message && (
-                    <div className="mt-0.5 max-w-xs text-xs text-slate-500">{c.health.message}</div>
+                    <div className="mt-1 max-w-xs text-xs text-slate-500">{c.health.message}</div>
                   )}
                   {c.lastSyncRun && (
                     <div className="mt-0.5 text-xs text-slate-400">
@@ -161,10 +171,10 @@ export default function XeroPage() {
                     </div>
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 align-top">
                   <div className="flex gap-2">
-                    <select
-                      className="rounded border border-slate-300 px-2 py-1 text-xs"
+                    <Select
+                      className="w-40"
                       value={assignEntityByConn[c.id] ?? ""}
                       onChange={(e) =>
                         setAssignEntityByConn((s) => ({ ...s, [c.id]: e.target.value }))
@@ -176,28 +186,22 @@ export default function XeroPage() {
                           {e.shortCode}
                         </option>
                       ))}
-                    </select>
-                    <button
-                      onClick={() => assign(c.id)}
-                      className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700"
-                    >
+                    </Select>
+                    <Button variant="secondary" onClick={() => assign(c.id)}>
                       Assign
-                    </button>
+                    </Button>
                   </div>
                 </td>
               </tr>
             ))}
-            {connections.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
-                  No connections yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      {assignResult && <p className="text-sm text-slate-600">{assignResult}</p>}
+          {connections.length === 0 && (
+            <EmptyRow colSpan={4}>
+              No Xero organisations connected yet.
+            </EmptyRow>
+          )}
+        </tbody>
+      </TableFrame>
+      {assignResult && <Notice tone={assignResult.startsWith("Error") ? "error" : "ok"}>{assignResult}</Notice>}
     </div>
   );
 }

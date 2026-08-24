@@ -26,4 +26,44 @@
   .figures {
     font-variant-numeric: tabular-nums;
   }
+
+  /**
+   * The surfaces the browser draws for us still belong to the design. Left at
+   * their defaults they are the clearest signal that a page was assembled
+   * rather than built.
+   */
+  ::selection {
+    background-color: #cfe0ee; /* accent at low saturation, keeps text readable */
+    color: #0f172a;
+  }
+
+  :is(input, textarea) {
+    caret-color: #1e5c8f; /* accent */
+  }
+
+  /* Long tables scroll. A default scrollbar in the middle of a finance table
+     reads as a browser artifact rather than part of the page. */
+  * {
+    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-width: thin;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1; /* neutral-300 */
+    border: 3px solid #f8fafc;
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+  }
 }

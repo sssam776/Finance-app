@@ -163,7 +163,7 @@ export default function CashPositionPage() {
       </div>
 
       {data.exceptionCount > 0 && (
-        <div className="rounded border-l-4 border-exception bg-exception-bg px-4 py-3 text-sm text-exception">
+        <div className="rounded border border-exception/30 bg-exception-bg px-4 py-3 text-sm text-exception">
           <span className="font-medium">
             {data.exceptionCount} account{data.exceptionCount === 1 ? "" : "s"}
           </span>{" "}
