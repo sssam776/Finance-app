@@ -154,6 +154,17 @@ export default function VariancePage() {
             </span>
           </div>
 
+          {!data.threshold && (
+            // Without this, a page flagging nothing is indistinguishable from a
+            // page where nothing breached. The first needs configuring; the
+            // second is good news.
+            <Notice tone="warn">
+              No P&amp;L movement threshold is configured, so nothing is flagged as an exception.
+              Rows below are ranked by size of movement only. Set a threshold on the Cash Position
+              page to have breaches marked.
+            </Notice>
+          )}
+
           <TableFrame>
             <Thead>
               <tr>

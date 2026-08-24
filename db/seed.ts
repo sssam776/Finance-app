@@ -122,19 +122,30 @@ function seedAdminUser(now: string) {
  * the dashboard (REM-001).
  */
 function seedDefaultThreshold(now: string) {
-  db.insert(varianceThresholds)
-    .values({
-      id: nanoid(),
-      entityId: GLOBAL_THRESHOLD_SCOPE,
-      context: "cash",
-      absoluteAmount: "1000.00",
-      percent: "1.00",
-      updatedByEmail: "seed@local",
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing()
-    .run();
+  // One default per context. Contexts never fall back to one another, so a
+  // context with no row flags nothing at all, and a page showing no exceptions
+  // would be indistinguishable from a page where nothing breached.
+  const defaults = [
+    { context: "cash" as const, absoluteAmount: "1000.00", percent: "1.00" },
+    // A P&L line moving by $5,000 or 10% is worth a sentence of explanation.
+    { context: "pnl_movement" as const, absoluteAmount: "5000.00", percent: "10.00" },
+  ];
+
+  for (const d of defaults) {
+    db.insert(varianceThresholds)
+      .values({
+        id: nanoid(),
+        entityId: GLOBAL_THRESHOLD_SCOPE,
+        context: d.context,
+        absoluteAmount: d.absoluteAmount,
+        percent: d.percent,
+        updatedByEmail: "seed@local",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
 }
 
 seed();
