@@ -40,30 +40,44 @@ export function AppHeader() {
 
   return (
     <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-        <div>
-          <div className="text-lg font-semibold">Ramwall Finance Control</div>
-          <div className="text-xs text-slate-500">
-            Quick version — read-only slice, unverified data marked throughout
-          </div>
-        </div>
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-3">
+        <Link href="/" className="rounded text-base font-semibold text-slate-900">
+          Ramwall Finance Control
+        </Link>
 
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-5">
           <nav className="flex gap-4 text-sm">
-            {NAV_ITEMS.map((item) => (
-              <Link key={item.href} href={item.href} className="text-slate-600 hover:text-slate-900">
-                {item.label}
-              </Link>
-            ))}
+            {NAV_ITEMS.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  className={
+                    active
+                      ? "rounded font-medium text-slate-900"
+                      : "rounded text-slate-500 hover:text-slate-900"
+                  }
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
 
           {me && (
-            <div className="flex items-center gap-3 border-l border-slate-200 pl-6 text-sm">
-              <Link href="/account" className="text-right leading-tight hover:opacity-80">
-                <div className="text-slate-700">{me.displayName}</div>
-                <div className="text-xs text-slate-400">{me.role}</div>
+            <div className="flex items-center gap-3 border-l border-slate-200 pl-5 text-sm">
+              <Link href="/account" className="rounded leading-tight hover:opacity-80">
+                <span className="text-slate-700">{me.displayName}</span>
+                <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                  {me.role}
+                </span>
               </Link>
-              <button onClick={signOut} className="text-xs text-slate-500 underline hover:text-slate-800">
+              <button
+                onClick={signOut}
+                className="rounded text-sm text-accent hover:text-accent-hover hover:underline"
+              >
                 Sign out
               </button>
             </div>

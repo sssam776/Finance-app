@@ -120,65 +120,82 @@ export default function CashPositionPage() {
   if (loading) return <div className="text-slate-500">Loading cash position…</div>;
   if (!data || data.accounts.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
-        No bank accounts mapped yet. Go to <span className="font-medium">Entities</span> to add one, then{" "}
-        <span className="font-medium">Bank Imports</span> to upload a statement.
+      <div className="max-w-prose rounded border border-dashed border-slate-300 p-8 text-slate-500">
+        No bank accounts mapped yet. Go to <span className="font-medium text-slate-700">Entities</span> to
+        add one, then <span className="font-medium text-slate-700">Bank Imports</span> to upload a
+        statement.
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Cash Position</h1>
-          <p className="text-sm text-slate-500">
-            Available cash (loan facilities excluded) — CASH-002
-          </p>
+          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-slate-900">Cash Position</h1>
+          <p className="mt-1 text-sm text-slate-500">Available cash, loan facilities excluded</p>
         </div>
+
         <div className="text-right">
           {data.availableCashByCurrency.length === 0 ? (
-            <div className="text-3xl font-semibold">—</div>
+            <div className="text-figure-hero text-slate-400">—</div>
           ) : (
             data.availableCashByCurrency.map((total) => (
-              <div key={total.currency} className="text-3xl font-semibold tabular-nums">
+              <div key={total.currency} className="figures text-figure-hero text-slate-900">
                 {total.amount}
+                {/* Currency always sits with the amount: this app never sums
+                    across currencies, so a bare number would imply it had. */}
                 <span className="ml-1.5 text-sm font-normal text-slate-500">{total.currency}</span>
               </div>
             ))
           )}
           {data.hasForeignCurrency && (
-            <div className="text-xs text-amber-600">
+            <div className="mt-1 max-w-xs text-xs text-stale">
               Shown per currency. No FX rate source is configured, so these are not added together.
             </div>
           )}
           {data.oldestSourceDate && (
-            <div className="text-xs text-amber-600">
-              Oldest underlying source date: {data.oldestSourceDate}
+            <div className="mt-1 text-xs text-stale">
+              Oldest source date <span className="figures">{data.oldestSourceDate}</span>
             </div>
           )}
         </div>
       </div>
 
       {data.exceptionCount > 0 && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {data.exceptionCount} account{data.exceptionCount === 1 ? "" : "s"} breach the configured variance
-          threshold. Open a row to see the source records behind the figures.
+        <div className="rounded border-l-4 border-exception bg-exception-bg px-4 py-3 text-sm text-exception">
+          <span className="font-medium">
+            {data.exceptionCount} account{data.exceptionCount === 1 ? "" : "s"}
+          </span>{" "}
+          {data.exceptionCount === 1 ? "breaches" : "breach"} the configured variance threshold. Open a row
+          to see the source records behind the figures.
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <div className="overflow-x-auto rounded border border-slate-200 bg-white shadow-panel">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          {/* Explicit widths: left to itself the browser gave the text columns
+              the space and squeezed the dates until they broke mid-value. */}
+          <colgroup>
+            <col className="w-[13%]" />
+            <col className="w-[22%]" />
+            <col className="w-[13%]" />
+            <col className="w-[10%]" />
+            <col className="w-[13%]" />
+            <col className="w-[10%]" />
+            <col className="w-[13%]" />
+            <col className="w-[6%]" />
+          </colgroup>
+          <thead className="border-b border-slate-200 bg-slate-100 text-left text-label uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3">Entity</th>
-              <th className="px-4 py-3">Account</th>
-              <th className="px-4 py-3 text-right">Bank balance</th>
-              <th className="px-4 py-3">As at</th>
-              <th className="px-4 py-3 text-right">Xero balance</th>
-              <th className="px-4 py-3">As at</th>
-              <th className="px-4 py-3 text-right">Variance</th>
-              <th className="px-4 py-3" />
+              <th className="whitespace-nowrap px-4 py-2.5 font-medium">Entity</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-medium">Account</th>
+              <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium">Bank</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-medium">As at</th>
+              <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium">Xero</th>
+              <th className="whitespace-nowrap px-4 py-2.5 font-medium">As at</th>
+              <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium">Variance</th>
+              <th className="px-4 py-2.5" />
             </tr>
           </thead>
           <tbody>
@@ -197,13 +214,10 @@ export default function CashPositionPage() {
       </div>
 
       {isAdmin && (
-        <form
-          onSubmit={saveThreshold}
-          className="rounded-lg border border-slate-200 bg-white p-5 space-y-3"
-        >
+        <form onSubmit={saveThreshold} className="space-y-3 rounded border border-slate-200 bg-white p-5 shadow-panel">
           <div>
-            <h2 className="text-sm font-medium">Group variance threshold (CASH-005)</h2>
-            <p className="text-xs text-slate-500">
+            <h2 className="text-sm font-semibold text-slate-900">Group variance threshold</h2>
+            <p className="mt-0.5 max-w-prose text-xs text-slate-500">
               A variance is flagged when it exceeds either trigger. Applies to every entity without its
               own override.
             </p>
@@ -212,26 +226,29 @@ export default function CashPositionPage() {
             <label className="text-sm">
               <span className="text-slate-600">Amount over</span>
               <input
-                className="mt-1 block w-40 rounded border border-slate-300 px-2 py-1.5"
+                className="figures mt-1 block w-40 rounded border border-slate-300 px-2 py-1.5 text-slate-900"
                 value={amountLimit}
                 onChange={(e) => setAmountLimit(e.target.value)}
                 placeholder="1000.00"
+                inputMode="decimal"
                 required
               />
             </label>
             <label className="text-sm">
-              <span className="text-slate-600">or percent over (optional)</span>
+              <span className="text-slate-600">or percent over</span>
+              <span className="ml-1 text-xs text-slate-400">optional</span>
               <input
-                className="mt-1 block w-40 rounded border border-slate-300 px-2 py-1.5"
+                className="figures mt-1 block w-40 rounded border border-slate-300 px-2 py-1.5 text-slate-900"
                 value={percentLimit}
                 onChange={(e) => setPercentLimit(e.target.value)}
                 placeholder="1.00"
+                inputMode="decimal"
               />
             </label>
             <button
               type="submit"
               disabled={savingThreshold}
-              className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700 disabled:opacity-50"
+              className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
             >
               {savingThreshold ? "Saving…" : "Save threshold"}
             </button>
@@ -240,8 +257,9 @@ export default function CashPositionPage() {
         </form>
       )}
 
-      <p className="text-xs text-slate-400">
-        Xero-to-bank comparison is a control/variance check, not line-by-line bank reconciliation (spec 3.10, CASH-004).
+      <p className="max-w-prose text-xs text-slate-400">
+        The Xero-to-bank comparison is a control and variance check, not line-by-line bank
+        reconciliation.
       </p>
     </div>
   );
@@ -260,49 +278,95 @@ function FragmentRow({
 
   return (
     <>
-      <tr className={`border-t border-slate-100 ${row.isException ? "bg-red-50/50" : ""}`}>
-        <td className="px-4 py-3">
-          <div className="font-medium">{row.entityShortCode}</div>
+      <tr
+        className={
+          row.isException ? "border-t border-slate-100 bg-exception-bg" : "border-t border-slate-100"
+        }
+      >
+        <td className="px-4 py-3 align-top">
+          <div className="font-medium text-slate-900">{row.entityShortCode}</div>
+          {row.isException && (
+            // The badge lives in the first column, not beside the variance.
+            // The table scrolls horizontally on a narrow viewport, and the
+            // variance column goes off-screen first: putting the only
+            // non-colour signal there left the row tint doing the work alone.
+            <div className="mt-1">
+              <span className="rounded bg-exception px-1.5 py-0.5 text-xs font-medium text-white">
+                exception
+              </span>
+            </div>
+          )}
           {row.entityStatus === "unverified" && (
-            <div className="text-xs text-amber-600">unverified entity</div>
+            // Said in words, not implied by colour. These entities stay
+            // unverified until the client confirms which have their own Xero
+            // organisation, and nobody should read a figure without knowing.
+            <div className="mt-1 text-xs text-stale">unverified entity</div>
           )}
         </td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 align-top text-slate-700">
           {row.bankName} — {row.accountName}
           {row.isLoanFacility && (
             <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
-              loan (excluded)
+              loan, excluded
             </span>
           )}
         </td>
-        <td className="px-4 py-3 text-right tabular-nums">
-          {row.bankBalance ? `${row.bankBalance} ${row.currency}` : "—"}
+        <td className="figures whitespace-nowrap px-4 py-3 text-right align-top text-slate-900">
+          {row.bankBalance ? (
+            <>
+              {row.bankBalance}
+              <span className="ml-1 text-xs font-normal text-slate-400">{row.currency}</span>
+            </>
+          ) : (
+            <span className="text-slate-400">—</span>
+          )}
         </td>
-        <td className="px-4 py-3 text-slate-500">{row.bankBalanceDate ?? "—"}</td>
-        <td className="px-4 py-3 text-right tabular-nums">
-          {row.xeroBalance ? row.xeroBalance : "not synced"}
+        {/* A date that wraps mid-value is unreadable, and these are the dates
+            the whole variance judgement rests on. */}
+        <td className="figures whitespace-nowrap px-4 py-3 align-top text-slate-500">
+          {row.bankBalanceDate ?? "—"}
         </td>
-        <td className="px-4 py-3 text-slate-500">{row.xeroBalanceDate ?? "—"}</td>
-        <td className="px-4 py-3 text-right tabular-nums">
+        <td className="figures whitespace-nowrap px-4 py-3 text-right align-top text-slate-900">
+          {row.xeroBalance ? (
+            <>
+              {row.xeroBalance}
+              {/* Currency here too. Showing it on one balance and not the other
+                  invites the reader to assume they are the same unit. */}
+              <span className="ml-1 text-xs font-normal text-slate-400">{row.currency}</span>
+            </>
+          ) : (
+            <span className="text-slate-400">not synced</span>
+          )}
+        </td>
+        <td className="figures whitespace-nowrap px-4 py-3 align-top text-slate-500">
+          {row.xeroBalanceDate ?? "—"}
+        </td>
+        <td className="px-4 py-3 text-right align-top">
           {row.currencyMismatch ? (
-            <span className="text-xs text-amber-600">currency mismatch</span>
+            <span className="text-xs text-stale">currency mismatch</span>
           ) : row.variance ? (
-            <span className={row.isException ? "font-medium text-red-600" : "text-slate-700"}>
-              {row.variance.amount} {row.variance.currency}
-              {row.variance.percent && <span className="text-xs"> ({row.variance.percent}%)</span>}
-              {row.isException && (
-                <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-700">
-                  exception
+            <div className={row.isException ? "text-exception" : "text-slate-700"}>
+              <div className={`figures whitespace-nowrap ${row.isException ? "font-medium" : ""}`}>
+                {row.variance.amount}
+                <span className="ml-1 text-xs font-normal text-slate-400">
+                  {row.variance.currency}
                 </span>
-              )}
-            </span>
+                {row.variance.percent && (
+                  <span className="ml-1 text-xs font-normal">({row.variance.percent}%)</span>
+                )}
+              </div>
+            </div>
           ) : (
             <span className="text-slate-400">n/a</span>
           )}
         </td>
-        <td className="px-4 py-3 text-right">
+        <td className="px-4 py-3 text-right align-top">
           {hasEvidence && (
-            <button onClick={onToggle} className="text-xs text-slate-500 underline hover:text-slate-800">
+            <button
+              onClick={onToggle}
+              aria-expanded={expanded}
+              className="rounded text-xs font-medium text-accent hover:text-accent-hover hover:underline"
+            >
               {expanded ? "Hide" : "Evidence"}
             </button>
           )}
@@ -347,8 +411,15 @@ function FragmentRow({
 
             {row.threshold && (
               <p className="mt-4 text-xs text-slate-500">
-                Threshold applied: ${row.threshold.absoluteAmount}
-                {row.threshold.percent && ` or ${row.threshold.percent}%`} ({row.threshold.scope} scope)
+                Threshold applied{" "}
+                <span className="figures text-slate-700">{row.threshold.absoluteAmount}</span>
+                {row.threshold.percent && (
+                  <>
+                    {" or "}
+                    <span className="figures text-slate-700">{row.threshold.percent}%</span>
+                  </>
+                )}
+                , {row.threshold.scope} scope
               </p>
             )}
           </td>
@@ -361,7 +432,7 @@ function FragmentRow({
 function EvidenceBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">{title}</h3>
+      <h3 className="mb-2 text-label uppercase text-slate-500">{title}</h3>
       <dl className="space-y-1 text-xs">{children}</dl>
     </div>
   );
@@ -371,7 +442,9 @@ function Fact({ label, value, mono }: { label: string; value: string; mono?: boo
   return (
     <div className="flex gap-2">
       <dt className="w-28 shrink-0 text-slate-400">{label}</dt>
-      <dd className={`text-slate-700 ${mono ? "font-mono" : ""}`}>{value}</dd>
+      {/* Identifiers and checksums get a monospace face so they can be compared
+          character by character, which is the only reason anyone reads them. */}
+      <dd className={mono ? "break-all font-mono text-slate-700" : "text-slate-700"}>{value}</dd>
     </div>
   );
 }

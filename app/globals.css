@@ -2,7 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background-color: #f8fafc;
-  color: #0f172a;
+@layer base {
+  body {
+    background-color: #f8fafc; /* neutral-50 */
+    color: #0f172a; /* neutral-900 */
+  }
+
+  /**
+   * A visible focus ring on everything interactive. The default outline is
+   * suppressed by Tailwind's reset, and a keyboard user with no focus
+   * indicator cannot operate the app at all.
+   */
+  :focus-visible {
+    outline: 2px solid #1e5c8f;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /**
+   * Figures are the content of this product. Aligning digits is what makes a
+   * column of money scannable, which is the entire task.
+   */
+  .figures {
+    font-variant-numeric: tabular-nums;
+  }
 }
