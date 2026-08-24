@@ -124,6 +124,73 @@ export function trialBalanceBalances(
   return new Decimal(debitTotal).minus(creditTotal).abs().lessThanOrEqualTo(new Decimal(tolerance));
 }
 
+export type PlSectionKind =
+  | "revenue"
+  | "cost_of_sales"
+  | "operating_expense"
+  | "other_income"
+  | "other_expense"
+  | "total"
+  | "unclassified";
+
+/**
+ * Xero section titles vary by organisation and by chart of accounts, so this
+ * is a best effort over the common ones. Anything unrecognised returns
+ * `unclassified` rather than guessing, because a misclassified section inverts
+ * the favourable/adverse judgement for every account inside it, and a row
+ * marked unclassified is visibly unjudged rather than silently wrong.
+ */
+export function classifySection(title: string | null): PlSectionKind {
+  if (!title) return "unclassified";
+  const t = title.toLowerCase();
+
+  if (/total|gross profit|net profit|net income|net surplus/.test(t)) return "total";
+  if (/cost of (sales|goods)|direct cost/.test(t)) return "cost_of_sales";
+  if (/other income|non-?operating income/.test(t)) return "other_income";
+  if (/other expense|non-?operating expense/.test(t)) return "other_expense";
+  if (/expense|overhead|operating cost|less /.test(t)) return "operating_expense";
+  if (/income|revenue|turnover|sales/.test(t)) return "revenue";
+
+  return "unclassified";
+}
+
+export interface PlAccountRow {
+  section: string | null;
+  sectionKind: PlSectionKind;
+  accountName: string;
+  xeroAccountId: string | null;
+  /** Column label from the report header, in the order Xero returned them. */
+  amountsByColumn: { columnLabel: string; amount: string | null }[];
+  isSubtotal: boolean;
+}
+
+/**
+ * Profit and loss, one row per account with every period column it carried.
+ *
+ * Column labels come from the report's own header rather than being assumed
+ * positionally, so a change in how many comparison periods were requested
+ * cannot silently shift which month a figure belongs to. The caller maps the
+ * label to a period key; this function does not guess at date formats.
+ */
+export function parseProfitAndLoss(report: ReportWithRows): PlAccountRow[] {
+  const headers = headersOf(report);
+
+  return rowsOf(report)
+    .filter((row) => row.cells.length >= 2 && row.cells[0]!.value.trim() !== "")
+    .map((row) => ({
+      section: row.sectionTitle,
+      sectionKind: classifySection(row.sectionTitle),
+      accountName: row.cells[0]!.value,
+      xeroAccountId: row.cells[0]!.attributes.account ?? null,
+      isSubtotal: row.isSubtotal,
+      // Column 0 is the account name, so amounts start at 1.
+      amountsByColumn: row.cells.slice(1).map((cell, i) => ({
+        columnLabel: headers[i + 1] ?? `column_${i + 1}`,
+        amount: parseReportAmount(cell.value),
+      })),
+    }));
+}
+
 export function parseBankSummaryClosingBalances(report: ReportWithRows): BankSummaryBalance[] {
   const results: BankSummaryBalance[] = [];
   const topLevelRows = report.reports?.[0]?.rows ?? [];

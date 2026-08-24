@@ -9,6 +9,8 @@ import {
   trialBalanceBalances,
   parseBankSummaryClosingBalances,
   bankSummaryColumnResolved,
+  classifySection,
+  parseProfitAndLoss,
 } from "../lib/xero/reports";
 
 /** Xero's shape: one report, a header row, then sections of rows of cells. */
@@ -210,6 +212,95 @@ describe("trialBalanceBalances", () => {
     // A trial balance that does not balance means the parse is wrong, and
     // every figure derived from it is untrustworthy.
     expect(trialBalanceBalances("1000.00", "900.00")).toBe(false);
+  });
+});
+
+describe("classifySection", () => {
+  it("classifies the common Xero section titles", () => {
+    expect(classifySection("Income")).toBe("revenue");
+    expect(classifySection("Trading Income")).toBe("revenue");
+    expect(classifySection("Cost of Sales")).toBe("cost_of_sales");
+    expect(classifySection("Less Operating Expenses")).toBe("operating_expense");
+    expect(classifySection("Other Income")).toBe("other_income");
+    expect(classifySection("Gross Profit")).toBe("total");
+    expect(classifySection("Net Profit")).toBe("total");
+  });
+
+  it("prefers the more specific match when titles overlap", () => {
+    // "Cost of Sales" contains "sales", which would otherwise read as revenue
+    // and invert the judgement for every account under it.
+    expect(classifySection("Cost of Sales")).toBe("cost_of_sales");
+    // "Total Income" contains "income" but is a computed row.
+    expect(classifySection("Total Income")).toBe("total");
+    // "Other Expense" must not fall through to operating_expense.
+    expect(classifySection("Other Expenses")).toBe("other_expense");
+  });
+
+  it("returns unclassified rather than guessing", () => {
+    // A misclassified section inverts favourable/adverse for every account in
+    // it. Visibly unjudged beats silently wrong.
+    expect(classifySection("Bespoke Section Name")).toBe("unclassified");
+    expect(classifySection(null)).toBe("unclassified");
+    expect(classifySection("")).toBe("unclassified");
+  });
+
+  it("is case-insensitive", () => {
+    expect(classifySection("LESS OPERATING EXPENSES")).toBe("operating_expense");
+  });
+});
+
+describe("parseProfitAndLoss", () => {
+  const pl = report([
+    header(["Account", "Aug 2026", "Jul 2026", "Aug 2025"]),
+    section("Income", [row(["Sales", "10000.00", "9000.00", "8000.00"], [{ account: "guid-sales" }])]),
+    section("Less Operating Expenses", [
+      row(["Rent", "2000.00", "2000.00", "1800.00"]),
+      { rowType: RowType.SummaryRow, cells: [{ value: "Total Expenses" }, { value: "2000.00" }] },
+    ]),
+  ]);
+
+  it("returns one row per account with every column", () => {
+    const rows = parseProfitAndLoss(pl);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]!.accountName).toBe("Sales");
+    expect(rows[0]!.amountsByColumn).toHaveLength(3);
+  });
+
+  it("labels amounts from the report header rather than by position", () => {
+    // If the number of comparison periods changes, a positional assumption
+    // would silently shift which month a figure belongs to.
+    const rows = parseProfitAndLoss(pl);
+    expect(rows[0]!.amountsByColumn.map((c) => c.columnLabel)).toEqual([
+      "Aug 2026",
+      "Jul 2026",
+      "Aug 2025",
+    ]);
+    expect(rows[0]!.amountsByColumn[0]!.amount).toBe("10000.0000");
+  });
+
+  it("classifies each row's section", () => {
+    const rows = parseProfitAndLoss(pl);
+    expect(rows[0]!.sectionKind).toBe("revenue");
+    expect(rows[1]!.sectionKind).toBe("operating_expense");
+  });
+
+  it("carries the Xero account id where the row has one", () => {
+    expect(parseProfitAndLoss(pl)[0]!.xeroAccountId).toBe("guid-sales");
+    expect(parseProfitAndLoss(pl)[1]!.xeroAccountId).toBeNull();
+  });
+
+  it("marks subtotal rows so the caller can exclude them from account movement", () => {
+    const rows = parseProfitAndLoss(pl);
+    expect(rows.find((r) => r.accountName === "Total Expenses")!.isSubtotal).toBe(true);
+    expect(rows[0]!.isSubtotal).toBe(false);
+  });
+
+  it("skips rows with a blank account name", () => {
+    const withBlank = report([
+      header(["Account", "Aug 2026"]),
+      section("Income", [row(["", "0.00"]), row(["Sales", "10.00"])]),
+    ]);
+    expect(parseProfitAndLoss(withBlank)).toHaveLength(1);
   });
 });
 
