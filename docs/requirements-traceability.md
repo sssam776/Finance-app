@@ -60,7 +60,28 @@ expired cookie. Do not move an authorisation decision into middleware.
 | CASH-005 | Configurable exception thresholds | built | `variance_thresholds` table (entity row overrides the `"*"` group default), resolution and comparison in `lib/thresholds.ts`, read/write via `app/api/thresholds/route.ts`, edited on the Cash Position page. Breaching either the amount or the percent trigger flags an exception |
 | CASH-006 | Variance evidence view | built | `app/api/cash-position/route.ts` returns the bank import (id, checksum, importer, receipt time, parser version, source row) and the Xero sync run (id, tenant, account, status, timings, records read) behind each figure; `app/page.tsx` renders them in an expandable evidence panel per row |
 
-## Everything else (Modules B-L, Parts XIV-XVIII)
+## Module C — P&L Movement and Budget Variance (Part XIII §20)
+
+| ID | Requirement | Status | Evidence |
+|---|---|---|---|
+| VAR-001 | Movement against a comparative period | built | `lib/variance/plMovement.ts`, `app/api/pl-variance/route.ts`. Prior month and same month last year. The favourable/adverse convention lives in `isFavourable` alone: revenue rising and cost rising are the same arithmetic and opposite news |
+| VAR-002 | Budget variance | **not started** | Needs an approved Xero budget or the client's budget workbook; neither exists. The route reports the comparison unavailable with a reason rather than returning a zero comparative, which would read as "budget was nil" |
+| VAR-003 | Materiality ranking | built | `rankByMateriality` puts exceptions above larger non-exceptions, so a small movement breaching a tight entity threshold is not buried under a large one that did not |
+| VAR-004 | Explanations | built | `variance_commentary` table, `app/api/pl-variance/commentary/route.ts`. Separate table and separate route; nothing on the calculation path reads it, and `scripts/verify-variance.ts` asserts the figures are byte-identical after a comment is saved |
+
+## Shared foundations (built ahead of Modules B-L)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Xero report layer | built | `report_snapshots` + `report_rows` (`db/schema.ts`), one walker `rowsOf` in `lib/xero/reports.ts`. Modules B, C and D each specified these tables with different columns; built once, merged |
+| Sync run envelope | built | `lib/xero/syncRun.ts` — start/complete/fail, used by both sync routes |
+| Paged, rate-limited fetching | built | `lib/xero/paged.ts` — page loop, 429 backoff honouring `Retry-After`, call cap, partial on cap-out |
+| Reporting periods | built | `lib/periods.ts` — period keys, ranges, NZ financial years, comparison labels derived at read time |
+| Approval rules | built | `lib/approval.ts` — segregation of duties and effective-dated version resolution, both fail closed |
+| Threshold contexts | built | `variance_thresholds.context`, so cash tolerance cannot stand in for P&L materiality |
+| Structural guards | built | `tests/guards.test.ts` — no write scope, no `XeroClient` outside `lib/xero`, no actor identity from a request body |
+
+## Everything else (Modules B, D-L, Parts XIV-XVIII)
 
 **Not started.** Board reporting, P&L/budget variance, balance-sheet
 substantiation, rules/exceptions, intercompany reconciliation, GST audit,
