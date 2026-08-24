@@ -268,6 +268,143 @@ export const bankBalanceSnapshots = sqliteTable("bank_balance_snapshots", {
 });
 
 // ---------------------------------------------------------------------------
+// 14.7 Xero report snapshots and rows
+// ---------------------------------------------------------------------------
+
+/**
+ * One table for every tabular Xero report, not one per module.
+ *
+ * Modules B, C and D each specified tables with these names and different
+ * columns, so whichever was built first would have silently broken the other
+ * two. This is the merged shape: C's period axis, D's evidence columns, B's
+ * ordering.
+ *
+ * Immutable by run (spec 14.7). A refresh inserts a new snapshot rather than
+ * updating one, so a board pack signed off in March still resolves to the
+ * figures it was signed off on.
+ */
+export const REPORT_TYPES = [
+  "profit_and_loss",
+  "balance_sheet",
+  "trial_balance",
+  "bank_summary",
+  "aged_receivables",
+  "aged_payables",
+] as const;
+
+export type ReportType = (typeof REPORT_TYPES)[number];
+
+export const reportSnapshots = sqliteTable(
+  "report_snapshots",
+  {
+    id: id(),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id),
+    reportType: text("report_type", { enum: REPORT_TYPES }).notNull(),
+    /** Date-only. The as-at date for a point-in-time report, the period end otherwise. */
+    periodEnd: text("period_end").notNull(),
+
+    // Lineage. Every synced row carries where it came from (spec 10.5).
+    xeroAppId: text("xero_app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    tenantId: text("tenant_id").notNull(),
+    syncRunId: text("sync_run_id")
+      .notNull()
+      .references(() => syncRuns.id),
+
+    sourceReportId: text("source_report_id"),
+    reportTitle: text("report_title"),
+
+    /**
+     * SHA-256 of the raw response, and the key it was stored under. A parser
+     * bug is then re-runnable against the original payload rather than
+     * requiring a fresh sync that may no longer return the same figures.
+     */
+    payloadHash: text("payload_hash").notNull(),
+    rawFileKey: text("raw_file_key"),
+    parserVersion: text("parser_version").notNull(),
+
+    /**
+     * Trial balance only. False fails the sync run: a trial balance whose
+     * debits and credits disagree means the parse is wrong, and every figure
+     * derived from it is untrustworthy.
+     */
+    debitTotal: text("debit_total"),
+    creditTotal: text("credit_total"),
+    balanced: integer("balanced", { mode: "boolean" }),
+
+    rowCount: integer("row_count").notNull().default(0),
+    fetchedAt: text("fetched_at").notNull(),
+    ...timestamps(),
+  },
+  (t) => ({
+    reportSnapshotRunUnique: uniqueIndex("report_snapshots_run_unique").on(
+      t.entityId,
+      t.reportType,
+      t.periodEnd,
+      t.syncRunId
+    ),
+    reportSnapshotLookupIdx: index("report_snapshots_lookup_idx").on(
+      t.entityId,
+      t.reportType,
+      t.periodEnd
+    ),
+  })
+);
+
+/**
+ * One row per account per column, stored long rather than wide.
+ *
+ * `periodKey` is the column axis and records WHICH period a figure belongs to,
+ * never how it is being viewed. A column stored as "prior_year" would be wrong
+ * twelve months later when the same figure is two years back; the comparison
+ * label is derived at read time by lib/periods.ts::relativeLabel.
+ */
+export const reportRows = sqliteTable(
+  "report_rows",
+  {
+    id: id(),
+    snapshotId: text("snapshot_id")
+      .notNull()
+      .references(() => reportSnapshots.id),
+
+    /** Position in the source report. Xero's own ordering is meaningful. */
+    rowOrder: integer("row_order").notNull(),
+    sectionTitle: text("section_title"),
+    /** Drives favourable/adverse: a cost increase is not the same as revenue rising. */
+    sectionKind: text("section_kind", {
+      enum: ["revenue", "expense", "asset", "liability", "equity", "other"],
+    }),
+
+    accountCode: text("account_code"),
+    accountName: text("account_name").notNull(),
+    /** Xero omits the account id on subtotal rows, so this is nullable. */
+    xeroAccountId: text("xero_account_id"),
+
+    /** `YYYY-MM` for a period column, a date-only for a point-in-time report. */
+    periodKey: text("period_key").notNull(),
+    amount: text("amount").notNull(), // decimal string
+    currency: text("currency").notNull().default("NZD"),
+
+    /**
+     * Trial balance only. BS-003 requires preserving the source signs as
+     * evidence, so the normalised debit-positive figure lives alongside them
+     * rather than replacing them.
+     */
+    sourceDebit: text("source_debit"),
+    sourceCredit: text("source_credit"),
+
+    isSubtotal: integer("is_subtotal", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    reportRowsSnapshotIdx: index("report_rows_snapshot_idx").on(t.snapshotId, t.rowOrder),
+    reportRowsAccountIdx: index("report_rows_account_idx").on(t.snapshotId, t.accountCode),
+  })
+);
+
+// ---------------------------------------------------------------------------
 // 15.1 Identity and access
 // ---------------------------------------------------------------------------
 

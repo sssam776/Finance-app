@@ -5,7 +5,7 @@ import { db } from "@/db/client";
 import { xeroAccounts } from "@/db/schema";
 import { resolveXeroRoute, getAuthenticatedClient } from "@/lib/xero/gateway";
 import { startSyncRun, completeSyncRun, failSyncRun } from "@/lib/xero/syncRun";
-import { parseBankSummaryClosingBalances } from "@/lib/xero/reports";
+import { parseBankSummaryClosingBalances, bankSummaryColumnResolved } from "@/lib/xero/reports";
 import { nowUtcIso } from "@/lib/dates";
 import { requireSession, entityAccessFor } from "@/lib/session";
 import { canAccessEntity } from "@/lib/entityAccess";
@@ -56,14 +56,28 @@ export async function POST(request: Request) {
 
     const bankSummary = await client.accountingApi.getReportBankSummary(tenantId);
     const closingBalances = parseBankSummaryClosingBalances(bankSummary.body);
+
+    // Prefer Xero's account GUID. The display name is user-editable in Xero,
+    // so a rename there would silently drop the balance and the variance would
+    // read as "not synced" rather than as an error.
+    const balanceByAccountId = new Map(
+      closingBalances.filter((b) => b.xeroAccountId).map((b) => [b.xeroAccountId!, b.closingBalance])
+    );
     const balanceByName = new Map(closingBalances.map((b) => [b.accountName, b.closingBalance]));
 
     const now = nowUtcIso();
     let recordsWritten = 0;
 
+    let matchedById = 0;
+    let matchedByName = 0;
+
     for (const account of accounts) {
       if (!account.accountID || !account.name) continue;
-      const closingBalance = balanceByName.get(account.name) ?? null;
+
+      const byId = balanceByAccountId.get(account.accountID);
+      const closingBalance = byId ?? balanceByName.get(account.name) ?? null;
+      if (byId !== undefined) matchedById += 1;
+      else if (closingBalance !== null) matchedByName += 1;
 
       const existing = db
         .select()
@@ -102,7 +116,15 @@ export async function POST(request: Request) {
       route,
       actorEmail: actor.email,
       recordsRead: recordsWritten,
-      detail: { bankSummaryRows: closingBalances.length },
+      detail: {
+        bankSummaryRows: closingBalances.length,
+        // Recorded so the name-matching assumption can be checked against a
+        // real organisation rather than argued about. Every balance matching
+        // by name means Xero is not returning account ids on these rows.
+        matchedById,
+        matchedByName,
+        closingColumnResolvedByHeader: bankSummaryColumnResolved(bankSummary.body),
+      },
     });
 
     return NextResponse.json({ syncRunId, recordsWritten });
