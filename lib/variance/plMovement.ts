@@ -36,6 +36,8 @@ const COST_KINDS: ReadonlySet<SectionKind> = new Set([
 ]);
 
 export interface PlRow {
+  /** Xero's GUID. The only identifier that survives a rename or a code change. */
+  xeroAccountId?: string | null;
   accountCode: string | null;
   accountName: string;
   sectionKind: SectionKind;
@@ -82,12 +84,38 @@ export function isFavourable(sectionKind: SectionKind, movement: string): boolea
 }
 
 /**
- * Joins on account code where both sides have one, and falls back to the
- * account name. Xero omits the code on computed rows, and an entity that has
- * never set codes has only names to match on.
+ * Identity, most stable first: Xero's GUID, then the account code, then the
+ * name.
+ *
+ * The ladder matters because the key must be the same on both sides or one
+ * account splits into two rows, reported as a full rise and a full fall. That
+ * happens whenever an identifier is present in one period and absent in the
+ * other, which a code added mid-year produces. The GUID survives both a rename
+ * and a code change, so it is preferred wherever the row carries it.
  */
 function keyOf(row: PlRow): string {
-  return row.accountCode ? `code:${row.accountCode}` : `name:${row.accountName.toLowerCase()}`;
+  if (row.xeroAccountId) return `id:${row.xeroAccountId}`;
+  if (row.accountCode) return `code:${row.accountCode}`;
+  return `name:${row.accountName.trim().toLowerCase()}`;
+}
+
+/**
+ * Keys present on one side under a weaker identifier and on the other under a
+ * stronger one are the same account seen twice. Rewriting the weaker key to
+ * the stronger one keeps them together.
+ */
+function unifyKeys(actualRows: PlRow[], comparativeRows: PlRow[]): Map<string, string> {
+  const canonical = new Map<string, string>();
+
+  for (const row of [...actualRows, ...comparativeRows]) {
+    const strong = keyOf(row);
+    if (row.xeroAccountId && row.accountCode) canonical.set(`code:${row.accountCode}`, strong);
+    if (row.xeroAccountId || row.accountCode) {
+      canonical.set(`name:${row.accountName.trim().toLowerCase()}`, strong);
+    }
+  }
+
+  return canonical;
 }
 
 export interface MovementOptions {
@@ -109,8 +137,11 @@ export function computeMovements(
   options: MovementOptions
 ): MovementRow[] {
   const currency = options.currency ?? "NZD";
-  const comparativeByKey = new Map(comparativeRows.map((r) => [keyOf(r), r]));
-  const actualByKey = new Map(actualRows.map((r) => [keyOf(r), r]));
+  const canonical = unifyKeys(actualRows, comparativeRows);
+  const resolve = (row: PlRow) => canonical.get(keyOf(row)) ?? keyOf(row);
+
+  const comparativeByKey = new Map(comparativeRows.map((r) => [resolve(r), r]));
+  const actualByKey = new Map(actualRows.map((r) => [resolve(r), r]));
 
   const allKeys = [...new Set([...actualByKey.keys(), ...comparativeByKey.keys()])];
   const rows: MovementRow[] = [];

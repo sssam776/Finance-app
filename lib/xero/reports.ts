@@ -162,6 +162,23 @@ export interface PlAccountRow {
   /** Column label from the report header, in the order Xero returned them. */
   amountsByColumn: { columnLabel: string; amount: string | null }[];
   isSubtotal: boolean;
+  /** True when the row carried fewer cells than the header declared. */
+  short: boolean;
+}
+
+/**
+ * Aggregate lines Xero emits as ordinary rows in an untitled section rather
+ * than as RowType.SummaryRow.
+ *
+ * Left unmarked they survive the subtotal filter and are ranked and flagged
+ * alongside the very accounts they aggregate, so one adverse movement is
+ * reported twice: once as its components and once as the total.
+ */
+const AGGREGATE_LABEL =
+  /^(gross profit|net profit|net income|net surplus|net loss|total\b|operating profit)/i;
+
+export function isAggregateRowLabel(accountName: string): boolean {
+  return AGGREGATE_LABEL.test(accountName.trim());
 }
 
 /**
@@ -177,18 +194,27 @@ export function parseProfitAndLoss(report: ReportWithRows): PlAccountRow[] {
 
   return rowsOf(report)
     .filter((row) => row.cells.length >= 2 && row.cells[0]!.value.trim() !== "")
-    .map((row) => ({
-      section: row.sectionTitle,
-      sectionKind: classifySection(row.sectionTitle),
-      accountName: row.cells[0]!.value,
-      xeroAccountId: row.cells[0]!.attributes.account ?? null,
-      isSubtotal: row.isSubtotal,
-      // Column 0 is the account name, so amounts start at 1.
-      amountsByColumn: row.cells.slice(1).map((cell, i) => ({
-        columnLabel: headers[i + 1] ?? `column_${i + 1}`,
-        amount: parseReportAmount(cell.value),
-      })),
-    }));
+    .map((row) => {
+      const accountName = row.cells[0]!.value;
+      return {
+        section: row.sectionTitle,
+        sectionKind: classifySection(row.sectionTitle),
+        accountName,
+        xeroAccountId: row.cells[0]!.attributes.account ?? null,
+        // An aggregate is treated as a subtotal even when Xero sends it as an
+        // ordinary Row, which it does for NET PROFIT in an untitled section.
+        isSubtotal: row.isSubtotal || isAggregateRowLabel(accountName),
+        // A row narrower than the header is missing columns the report claimed
+        // to have. Reported so the sync can mark itself partial rather than
+        // letting the absent period read as a movement from zero.
+        short: headers.length > 0 && row.cells.length < headers.length,
+        // Column 0 is the account name, so amounts start at 1.
+        amountsByColumn: row.cells.slice(1).map((cell, i) => ({
+          columnLabel: headers[i + 1] ?? `column_${i + 1}`,
+          amount: parseReportAmount(cell.value),
+        })),
+      };
+    });
 }
 
 export function parseBankSummaryClosingBalances(report: ReportWithRows): BankSummaryBalance[] {

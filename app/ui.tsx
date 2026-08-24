@@ -75,6 +75,7 @@ export function Thead({ children }: { children: ReactNode }) {
 export function Button({
   children,
   variant = "primary",
+  className,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" }) {
   const base =
@@ -83,8 +84,12 @@ export function Button({
     variant === "primary"
       ? "bg-accent text-white hover:bg-accent-hover"
       : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50";
+  // className is destructured and appended rather than left in props. Spreading
+  // props after the class attribute let a caller's className replace the whole
+  // thing: the login button passed "w-full" and silently lost its colour,
+  // padding, weight and disabled state.
   return (
-    <button className={`${base} ${look}`} {...props}>
+    <button className={`${base} ${look} ${className ?? ""}`} {...props}>
       {children}
     </button>
   );
@@ -111,12 +116,12 @@ export function Field({
   );
 }
 
-export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={`${FIELD} w-full ${props.className ?? ""}`} />;
+export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={`${FIELD} w-full ${className ?? ""}`} />;
 }
 
-export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={`${FIELD} w-full ${props.className ?? ""}`} />;
+export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...props} className={`${FIELD} w-full ${className ?? ""}`} />;
 }
 
 /**

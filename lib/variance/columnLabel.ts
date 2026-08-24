@@ -24,20 +24,32 @@ const MONTH_PREFIXES = [
   "dec",
 ];
 
+function keyFrom(monthWord: string, yearDigits: string): PeriodKey | null {
+  const monthIndex = MONTH_PREFIXES.indexOf(monthWord.slice(0, 3).toLowerCase());
+  if (monthIndex < 0) return null;
+
+  // Xero abbreviates the year in date-style headers ("28 Feb 18"). Two digits
+  // are read as 2000-2099; the reporting window this app covers contains no
+  // twentieth-century periods, and isValidPeriodKey rejects anything outside it.
+  const year = yearDigits.length === 2 ? `20${yearDigits}` : yearDigits;
+  const key = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+  return isValidPeriodKey(key) ? key : null;
+}
+
 export function periodKeyFromColumnLabel(label: string): PeriodKey | null {
   const trimmed = label.trim();
 
-  // A month-name label, which is what Xero returns. Checked first because
-  // isValidPeriodKey is a type predicate over `string`, so calling it in an
-  // early return leaves the remaining branch narrowed to `never`.
-  const match = trimmed.match(/^([A-Za-z]{3,})\s+(\d{4})$/);
-  if (match) {
-    const monthIndex = MONTH_PREFIXES.indexOf(match[1]!.slice(0, 3).toLowerCase());
-    if (monthIndex < 0) return null;
+  // "Aug 2026" / "August 2026". Checked before isValidPeriodKey because that
+  // is a type predicate over `string`, so calling it in an early return leaves
+  // the remaining branch narrowed to `never`.
+  const monthYear = trimmed.match(/^([A-Za-z]{3,})\s+(\d{4})$/);
+  if (monthYear) return keyFrom(monthYear[1]!, monthYear[2]!);
 
-    const key = `${match[2]}-${String(monthIndex + 1).padStart(2, "0")}`;
-    return isValidPeriodKey(key) ? key : null;
-  }
+  // "28 Feb 18" / "30 Jun 2023". Xero returns this shape for period-end
+  // columns, and rejecting it meant every amount in the report was skipped as
+  // unresolved and the snapshot came back empty.
+  const dayMonthYear = trimmed.match(/^\d{1,2}\s+([A-Za-z]{3,})\s+(\d{2}|\d{4})$/);
+  if (dayMonthYear) return keyFrom(dayMonthYear[1]!, dayMonthYear[2]!);
 
   // Already a period key, which a caller may pass through unchanged.
   return isValidPeriodKey(trimmed) ? trimmed : null;

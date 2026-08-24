@@ -38,20 +38,58 @@ function judgementKind(stored: string | null, sectionTitle: string | null): Sect
   return "unclassified";
 }
 
-/** Newest snapshot covering this entity's P&L, whatever period end it was fetched for. */
-function latestSnapshot(entityId: string) {
-  return db
+/**
+ * The newest snapshot that both completed and actually holds the two periods
+ * being compared.
+ *
+ * Two rules, each of which was a real way to publish a wrong number:
+ *
+ * A snapshot whose sync run failed or ended partial is not authoritative. Its
+ * rows are whatever was written before the failure, and reading them produces
+ * a report built from half an answer.
+ *
+ * A snapshot that does not span the comparative period reads that side as
+ * zero, so every account shows its full actual as the movement. The percentage
+ * comes back null in that case, which removes the one cue that would look odd,
+ * making the fabricated comparison harder to notice rather than easier.
+ */
+function usableSnapshot(entityId: string, period: PeriodKey, comparePeriod: PeriodKey) {
+  const candidates = db
     .select()
     .from(reportSnapshots)
+    .innerJoin(syncRuns, eq(reportSnapshots.syncRunId, syncRuns.id))
     .where(
       and(
         eq(reportSnapshots.entityId, entityId),
-        eq(reportSnapshots.reportType, "profit_and_loss")
+        eq(reportSnapshots.reportType, "profit_and_loss"),
+        eq(syncRuns.status, "complete")
       )
     )
     .orderBy(desc(reportSnapshots.periodEnd), desc(reportSnapshots.createdAt))
-    .limit(1)
-    .get();
+    .all();
+
+  for (const row of candidates) {
+    const snapshot = row.report_snapshots;
+    const periodsPresent = db
+      .selectDistinct({ periodKey: reportRows.periodKey })
+      .from(reportRows)
+      .where(eq(reportRows.snapshotId, snapshot.id))
+      .all()
+      .map((r) => r.periodKey);
+
+    if (periodsPresent.includes(period) && periodsPresent.includes(comparePeriod)) {
+      return { snapshot, coverageProblem: null as string | null };
+    }
+  }
+
+  if (candidates.length === 0) {
+    return { snapshot: null, coverageProblem: null };
+  }
+  return {
+    snapshot: null,
+    coverageProblem:
+      "No completed snapshot holds both periods. Sync a range that covers them before comparing.",
+  };
 }
 
 function rowsForPeriod(snapshotId: string, period: PeriodKey): PlRow[] {
@@ -62,6 +100,7 @@ function rowsForPeriod(snapshotId: string, period: PeriodKey): PlRow[] {
     .all()
     .filter((r) => !r.isSubtotal) // subtotals would double-count against their own accounts
     .map((r) => ({
+      xeroAccountId: r.xeroAccountId,
       accountCode: r.accountCode,
       accountName: r.accountName,
       sectionKind: judgementKind(r.sectionKind, r.sectionTitle),
@@ -112,36 +151,26 @@ export async function GET(request: Request) {
     });
   }
 
-  const snapshot = latestSnapshot(entityId);
-  if (!snapshot) {
-    return NextResponse.json({
-      entityId,
-      period,
-      comparison,
-      available: false,
-      reason: "No profit and loss has been synced for this entity yet.",
-      rows: [],
-      exceptionCount: 0,
-    });
-  }
-
   const comparePeriod = comparison === "prior_month" ? priorPeriod(period) : priorYear(period);
+  const { snapshot, coverageProblem } = usableSnapshot(entityId, period, comparePeriod);
 
-  const actualRows = rowsForPeriod(snapshot.id, period);
-  const comparativeRows = rowsForPeriod(snapshot.id, comparePeriod);
-
-  if (actualRows.length === 0 && comparativeRows.length === 0) {
+  if (!snapshot) {
     return NextResponse.json({
       entityId,
       period,
       comparison,
       comparePeriod,
       available: false,
-      reason: `The latest snapshot holds no rows for ${formatPeriod(period)} or ${formatPeriod(comparePeriod)}. Sync a wider period range.`,
+      reason:
+        coverageProblem ??
+        "No completed profit and loss sync exists for this entity yet.",
       rows: [],
       exceptionCount: 0,
     });
   }
+
+  const actualRows = rowsForPeriod(snapshot.id, period);
+  const comparativeRows = rowsForPeriod(snapshot.id, comparePeriod);
 
   const thresholdRows = db.select().from(varianceThresholds).all();
   const threshold = resolveThreshold(thresholdRows, entityId, "pnl_movement");

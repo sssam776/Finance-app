@@ -89,11 +89,29 @@ export default function VariancePage() {
 
   useEffect(() => {
     if (!entityId || !period) return;
+
+    // Superseded requests are aborted and their responses discarded. Without
+    // this, selecting entity A then entity B shows A's figures under B's name
+    // if A's response lands second, which is the worst kind of wrong: every
+    // number is real and belongs to a different legal entity.
+    const controller = new AbortController();
     setLoading(true);
-    fetch(`/api/pl-variance?entityId=${entityId}&period=${period}&comparison=${comparison}`)
+
+    fetch(`/api/pl-variance?entityId=${entityId}&period=${period}&comparison=${comparison}`, {
+      signal: controller.signal,
+    })
       .then((r) => (r.ok ? r.json() : null))
-      .then(setData)
-      .finally(() => setLoading(false));
+      .then((body) => {
+        if (!controller.signal.aborted) setData(body);
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") setData(null);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
   }, [entityId, period, comparison]);
 
   return (
@@ -141,6 +159,10 @@ export default function VariancePage() {
       {!loading && data?.available && (
         <>
           <div className="flex flex-wrap items-center gap-4 text-sm">
+            {/* The entity the figures belong to, named from the response
+                rather than the selector, so a mismatch is visible instead of
+                being hidden behind whatever the dropdown happens to say. */}
+            <span className="font-medium text-slate-900">{data.entityShortCode}</span>
             <span className="text-slate-500">
               {data.periodLabel} against {data.comparePeriodLabel}
             </span>

@@ -237,6 +237,19 @@ async function main() {
   // A zero comparative would read as "budget was nil" rather than "no budget".
   check("  budget returns no rows", budgetBody.rows.length, 0);
 
+  console.log("\n--- a snapshot missing one side must not fabricate the comparison ---");
+  // The snapshot holds July and June. Asking July against July last year means
+  // the comparative period is absent entirely. Reading it as zero would show
+  // every account moving by its full actual, with the percentage null, which
+  // removes the one cue that would look wrong.
+  const noCover = await call(
+    `/api/pl-variance?entityId=${entity.id}&period=${PERIOD}&comparison=prior_year_month`
+  );
+  const noCoverBody = (await noCover.json()) as { available: boolean; reason: string; rows: Row[] };
+  check("  reports unavailable", noCoverBody.available, false);
+  check("  returns no rows", noCoverBody.rows.length, 0);
+  check("  explains the coverage gap", /both periods|covers/i.test(noCoverBody.reason), true);
+
   console.log("\n--- a period with no data says so ---");
   const empty = await call(
     `/api/pl-variance?entityId=${entity.id}&period=2019-01&comparison=prior_month`

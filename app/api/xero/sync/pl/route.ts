@@ -29,8 +29,12 @@ const syncSchema = z.object({
   entityId: z.string().min(1),
   /** Date-only. The last day of the most recent month to fetch. */
   periodEnd: z.string().refine(isValidDateOnly, "periodEnd must be a valid YYYY-MM-DD date"),
-  /** How many months back to request as comparison columns. */
-  periods: z.number().int().min(1).max(24).default(12),
+  /**
+   * How many months back to request as comparison columns. Xero documents a
+   * maximum of 12 (accountingApi.d.ts), so a larger value is rejected here as
+   * a 400 rather than surfacing later as an opaque upstream 502.
+   */
+  periods: z.number().int().min(1).max(12).default(12),
   /** Cash basis when true. Accrual is the default and the usual reporting basis. */
   paymentsOnly: z.boolean().default(false),
 });
@@ -94,82 +98,91 @@ export async function POST(request: Request) {
     const now = nowUtcIso();
     const snapshotId = nanoid();
 
-    db.insert(reportSnapshots)
-      .values({
-        id: snapshotId,
-        entityId,
-        reportType: "profit_and_loss",
-        periodEnd,
-        xeroAppId: route.xeroAppId,
-        connectionId: route.connectionId,
-        tenantId,
-        syncRunId,
-        sourceReportId: response.body.reports?.[0]?.reportID ?? null,
-        reportTitle: response.body.reports?.[0]?.reportName ?? null,
-        payloadHash: payloadHash(response.body),
-        parserVersion: REPORT_PARSER_VERSION,
-        rowCount: 0,
-        fetchedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
-
     // Column labels that cannot be resolved to a period are collected and
     // reported rather than dropped quietly. A figure filed under the wrong
     // month is worse than a figure that is visibly missing.
     const unresolvedColumns = new Set<string>();
     let written = 0;
+    const shortRows = accountRows.filter((r) => r.short).length;
 
-    for (const [index, accountRow] of accountRows.entries()) {
-      for (const column of accountRow.amountsByColumn) {
-        if (column.amount === null) continue;
+    // One transaction. A snapshot committed without its rows is readable as
+    // authoritative and holds only whatever was written before the failure,
+    // which is a report built from half an answer.
+    db.transaction((tx) => {
+      tx.insert(reportSnapshots)
+        .values({
+          id: snapshotId,
+          entityId,
+          reportType: "profit_and_loss",
+          periodEnd,
+          xeroAppId: route.xeroAppId,
+          connectionId: route.connectionId,
+          tenantId,
+          syncRunId,
+          sourceReportId: response.body.reports?.[0]?.reportID ?? null,
+          reportTitle: response.body.reports?.[0]?.reportName ?? null,
+          payloadHash: payloadHash(response.body),
+          parserVersion: REPORT_PARSER_VERSION,
+          rowCount: 0,
+          fetchedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
 
-        const period = periodKeyFromColumnLabel(column.columnLabel);
-        if (!period) {
-          unresolvedColumns.add(column.columnLabel);
-          continue;
+      for (const [index, accountRow] of accountRows.entries()) {
+        for (const column of accountRow.amountsByColumn) {
+          if (column.amount === null) continue;
+
+          const period = periodKeyFromColumnLabel(column.columnLabel);
+          if (!period) {
+            unresolvedColumns.add(column.columnLabel);
+            continue;
+          }
+
+          tx.insert(reportRows)
+            .values({
+              id: nanoid(),
+              snapshotId,
+              rowOrder: index,
+              sectionTitle: accountRow.section,
+              sectionKind: storedSectionKind(accountRow.sectionKind),
+              accountCode: null,
+              accountName: accountRow.accountName,
+              xeroAccountId: accountRow.xeroAccountId,
+              periodKey: period,
+              amount: column.amount,
+              currency: "NZD",
+              isSubtotal: accountRow.isSubtotal,
+              createdAt: now,
+            })
+            .run();
+          written += 1;
         }
-
-        db.insert(reportRows)
-          .values({
-            id: nanoid(),
-            snapshotId,
-            rowOrder: index,
-            sectionTitle: accountRow.section,
-            sectionKind: storedSectionKind(accountRow.sectionKind),
-            accountCode: null,
-            accountName: accountRow.accountName,
-            xeroAccountId: accountRow.xeroAccountId,
-            periodKey: period,
-            amount: column.amount,
-            currency: "NZD",
-            isSubtotal: accountRow.isSubtotal,
-            createdAt: now,
-          })
-          .run();
-        written += 1;
       }
-    }
 
-    db.update(reportSnapshots)
-      .set({ rowCount: written, updatedAt: nowUtcIso() })
-      .where(eq(reportSnapshots.id, snapshotId))
-      .run();
+      tx.update(reportSnapshots)
+        .set({ rowCount: written, updatedAt: nowUtcIso() })
+        .where(eq(reportSnapshots.id, snapshotId))
+        .run();
+    });
 
     await completeSyncRun({
       syncRunId,
       route,
       actorEmail: actor.email,
       recordsRead: written,
-      // A run that could not place every column is partial, not complete: it
-      // must not be treated as a full refresh of the period.
-      partial: unresolvedColumns.size > 0,
+      // A run that could not place every column, or that saw rows narrower
+      // than the header, is partial rather than complete: it must not be
+      // treated as a full refresh, and the read route only trusts complete
+      // runs.
+      partial: unresolvedColumns.size > 0 || shortRows > 0,
       detail: {
         snapshotId,
         accountRows: accountRows.length,
         columnHeaders: headersOf(response.body),
         unresolvedColumns: [...unresolvedColumns],
+        shortRows,
       },
     });
 

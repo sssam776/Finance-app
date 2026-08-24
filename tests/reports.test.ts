@@ -11,6 +11,7 @@ import {
   bankSummaryColumnResolved,
   classifySection,
   parseProfitAndLoss,
+  isAggregateRowLabel,
 } from "../lib/xero/reports";
 
 /** Xero's shape: one report, a header row, then sections of rows of cells. */
@@ -293,6 +294,42 @@ describe("parseProfitAndLoss", () => {
     const rows = parseProfitAndLoss(pl);
     expect(rows.find((r) => r.accountName === "Total Expenses")!.isSubtotal).toBe(true);
     expect(rows[0]!.isSubtotal).toBe(false);
+  });
+
+  it("treats an aggregate row as a subtotal even when Xero sends it as a normal row", () => {
+    // Xero emits NET PROFIT as an ordinary Row in an untitled section. Left
+    // unmarked it survives the subtotal filter and is ranked and flagged
+    // alongside the very accounts it aggregates.
+    const withNetProfit = report([
+      header(["Account", "Aug 2026"]),
+      section("Income", [row(["Sales", "10000.00"])]),
+      { rowType: RowType.Section, rows: [row(["NET PROFIT", "8000.00"])] },
+    ]);
+    const rows = parseProfitAndLoss(withNetProfit);
+    expect(rows.find((r) => r.accountName === "NET PROFIT")!.isSubtotal).toBe(true);
+    expect(rows.find((r) => r.accountName === "Sales")!.isSubtotal).toBe(false);
+  });
+
+  it("recognises the aggregate labels Xero uses", () => {
+    expect(isAggregateRowLabel("Gross Profit")).toBe(true);
+    expect(isAggregateRowLabel("NET PROFIT")).toBe(true);
+    expect(isAggregateRowLabel("Total Income")).toBe(true);
+    expect(isAggregateRowLabel("Operating Profit")).toBe(true);
+    // Real accounts that merely contain a similar word must not be caught.
+    expect(isAggregateRowLabel("Profit share paid")).toBe(false);
+    expect(isAggregateRowLabel("Totalisator fees")).toBe(false);
+  });
+
+  it("flags a row narrower than the header as short", () => {
+    // A missing column would otherwise read as that period simply having no
+    // figure, which the variance route reports as a movement from zero.
+    const ragged = report([
+      header(["Account", "Aug 2026", "Jul 2026"]),
+      section("Income", [row(["Sales", "100.00"]), row(["Fees", "50.00", "40.00"])]),
+    ]);
+    const rows = parseProfitAndLoss(ragged);
+    expect(rows.find((r) => r.accountName === "Sales")!.short).toBe(true);
+    expect(rows.find((r) => r.accountName === "Fees")!.short).toBe(false);
   });
 
   it("skips rows with a blank account name", () => {

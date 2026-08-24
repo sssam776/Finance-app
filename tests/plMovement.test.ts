@@ -137,6 +137,53 @@ describe("computeMovements", () => {
     expect(rows[0]!.isException).toBe(false);
   });
 
+  it("keeps one account together when a code appears on only one side", () => {
+    // The split this prevents: the same account reported as a full rise and a
+    // full fall, both ranked, when only its code changed.
+    const actual: PlRow[] = [
+      { accountCode: "200", accountName: "Sales", sectionKind: "revenue", amount: "100.00" },
+    ];
+    const comparative: PlRow[] = [
+      { accountCode: null, accountName: "Sales", sectionKind: "revenue", amount: "80.00" },
+    ];
+    const rows = computeMovements(actual, comparative, { threshold });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.movement).toBe("20.00");
+  });
+
+  it("prefers the Xero account id over the code", () => {
+    // The id survives both a rename and a code change, so it wins.
+    const actual: PlRow[] = [
+      {
+        xeroAccountId: "guid-1",
+        accountCode: "200",
+        accountName: "Sales",
+        sectionKind: "revenue",
+        amount: "100.00",
+      },
+    ];
+    const comparative: PlRow[] = [
+      {
+        xeroAccountId: "guid-1",
+        accountCode: "999",
+        accountName: "Renamed entirely",
+        sectionKind: "revenue",
+        amount: "80.00",
+      },
+    ];
+    const rows = computeMovements(actual, comparative, { threshold });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.movement).toBe("20.00");
+  });
+
+  it("keeps genuinely different accounts apart", () => {
+    const actual: PlRow[] = [
+      { xeroAccountId: "guid-1", accountCode: null, accountName: "Sales", sectionKind: "revenue", amount: "100.00" },
+      { xeroAccountId: "guid-2", accountCode: null, accountName: "Other sales", sectionKind: "revenue", amount: "50.00" },
+    ];
+    expect(computeMovements(actual, [], { threshold })).toHaveLength(2);
+  });
+
   it("does not drift on decimals the way floats would", () => {
     const rows = computeMovements([revenue("Sales", "0.30")], [revenue("Sales", "0.10")], {
       threshold,

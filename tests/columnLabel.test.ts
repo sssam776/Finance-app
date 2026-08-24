@@ -45,4 +45,23 @@ describe("periodKeyFromColumnLabel", () => {
     expect(periodKeyFromColumnLabel("2026")).toBeNull();
     expect(periodKeyFromColumnLabel("Aug")).toBeNull();
   });
+
+  it("reads Xero's date-style period-end headers", () => {
+    // Xero returns this shape on P&L period columns. Rejecting it meant every
+    // amount in the report was skipped and the snapshot came back empty.
+    expect(periodKeyFromColumnLabel("28 Feb 18")).toBe("2018-02");
+    expect(periodKeyFromColumnLabel("30 Jun 23")).toBe("2023-06");
+    expect(periodKeyFromColumnLabel("31 Aug 2026")).toBe("2026-08");
+    expect(periodKeyFromColumnLabel("1 Jan 2026")).toBe("2026-01");
+  });
+
+  it("reads a two-digit year as this century", () => {
+    expect(periodKeyFromColumnLabel("31 Dec 99")).toBe("2099-12");
+    expect(periodKeyFromColumnLabel("31 Dec 00")).toBe("2000-12");
+  });
+
+  it("still rejects a date-style label with an unreal month", () => {
+    expect(periodKeyFromColumnLabel("28 Feb")).toBeNull();
+    expect(periodKeyFromColumnLabel("28 Smarch 18")).toBeNull();
+  });
 });
