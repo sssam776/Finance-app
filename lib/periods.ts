@@ -31,9 +31,16 @@ export interface PeriodRange {
   end: DateOnly;
 }
 
+/**
+ * The year window is deliberately narrow. `Date.UTC` remaps years 0-99 to
+ * 1900-1999, so `addMonths("0050-01", 1)` would return "1950-02", and a year
+ * under 1000 formats to fewer than four characters, which breaks the
+ * lexicographic ordering that `periodsBetween` and every comparison in this
+ * file rely on. Rejecting the key here is better than returning one that no
+ * longer round-trips.
+ */
 export function isValidPeriodKey(value: string): value is PeriodKey {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return false;
-  return true;
+  return /^(19|20|21)\d{2}-(0[1-9]|1[0-2])$/.test(value);
 }
 
 function assertPeriodKey(key: string): asserts key is PeriodKey {
@@ -88,6 +95,9 @@ export function priorYear(key: PeriodKey): PeriodKey {
   return addMonths(key, -12);
 }
 
+/** Guards against an unbounded loop. Far wider than any real reporting range. */
+const MAX_PERIODS_IN_RANGE = 1200;
+
 /** Inclusive at both ends. Returns [] when `from` is after `to`. */
 export function periodsBetween(from: PeriodKey, to: PeriodKey): PeriodKey[] {
   assertPeriodKey(from);
@@ -96,11 +106,20 @@ export function periodsBetween(from: PeriodKey, to: PeriodKey): PeriodKey[] {
 
   const keys: PeriodKey[] = [];
   let cursor = from;
-  // Bounded so a malformed input cannot spin: 100 years of months.
-  for (let i = 0; i < 1200 && cursor <= to; i += 1) {
+
+  while (cursor <= to) {
+    if (keys.length >= MAX_PERIODS_IN_RANGE) {
+      // Throws rather than returning a short list. Silently truncating hands
+      // the caller a total for a range it never covered, and nothing
+      // downstream can tell the difference between that and a real answer.
+      throw new Error(
+        `Period range ${from}..${to} exceeds ${MAX_PERIODS_IN_RANGE} months. Narrow the range.`
+      );
+    }
     keys.push(cursor);
     cursor = addMonths(cursor, 1);
   }
+
   return keys;
 }
 

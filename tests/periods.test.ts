@@ -31,6 +31,23 @@ describe("period keys", () => {
     expect(isValidPeriodKey("2026-3")).toBe(false);
     expect(isValidPeriodKey("March 2026")).toBe(false);
   });
+
+  it("rejects years that Date.UTC would silently remap", () => {
+    // Date.UTC maps years 0-99 to 1900-1999, so addMonths("0050-01", 1) used
+    // to return "1950-02". A year under 1000 also formats to fewer than four
+    // characters, breaking the lexicographic ordering everything else needs.
+    expect(isValidPeriodKey("0050-01")).toBe(false);
+    expect(isValidPeriodKey("0099-06")).toBe(false);
+    expect(isValidPeriodKey("0100-01")).toBe(false);
+    expect(isValidPeriodKey("0999-12")).toBe(false);
+  });
+
+  it("accepts the plausible reporting window and rejects outside it", () => {
+    expect(isValidPeriodKey("1900-01")).toBe(true);
+    expect(isValidPeriodKey("2199-12")).toBe(true);
+    expect(isValidPeriodKey("2200-01")).toBe(false);
+    expect(isValidPeriodKey("1899-12")).toBe(false);
+  });
 });
 
 describe("periodRange", () => {
@@ -97,6 +114,19 @@ describe("periodsBetween", () => {
 
   it("spans a year boundary", () => {
     expect(periodsBetween("2025-11", "2026-02")).toEqual(["2025-11", "2025-12", "2026-01", "2026-02"]);
+  });
+
+  it("throws on an oversized range instead of silently truncating it", () => {
+    // Previously this returned 1200 keys ending at 2099-12 and looked like a
+    // complete answer. A caller summing over it reported a total for a range
+    // it never covered, with nothing downstream able to tell.
+    expect(() => periodsBetween("1950-01", "2150-12")).toThrow(/exceeds 1200 months/);
+  });
+
+  it("still returns a long but legitimate range in full", () => {
+    const twentyFiveYears = periodsBetween("2000-01", "2024-12");
+    expect(twentyFiveYears).toHaveLength(300);
+    expect(twentyFiveYears[299]).toBe("2024-12");
   });
 });
 
