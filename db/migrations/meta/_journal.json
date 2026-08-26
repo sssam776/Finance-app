@@ -57,6 +57,13 @@
       "when": 1787574484450,
       "tag": "0007_tough_the_enforcers",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787707778975,
+      "tag": "0008_grey_boom_boom",
+      "breakpoints": true
     }
   ]
 }
