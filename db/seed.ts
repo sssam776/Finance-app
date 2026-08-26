@@ -26,6 +26,36 @@ const CANDIDATE_ENTITIES = [
   { legalName: "Wallson Holdings Limited", shortCode: "WALLSON" },
 ];
 
+/**
+ * Development Xero app registrations.
+ *
+ * Each app is a separate registration on developer.xero.com with its own
+ * client credentials, so each carries its own pair of environment variable
+ * names. Only the names live here — a secret value never enters the database
+ * or the repository, and `readSecret` resolves the name at the point of use.
+ *
+ * Two registrations exist because a Starter tier app carries five connections
+ * against eight candidate entities. Note that spec 3.3 treats a second
+ * same-purpose Starter app as a free-tier workaround rather than a supported
+ * capacity strategy, and the production compliance gate refuses it: these rows
+ * are `environment='development'`, where that gate does not apply. Covering all
+ * eight entities in production is a tier decision, not a second registration.
+ */
+const DEVELOPMENT_XERO_APPS = [
+  {
+    appKey: "ramwall_read_core_dev",
+    displayName: "Ramwall Read Core (Development)",
+    clientIdSecretRef: "XERO_RAMWALL_READ_CORE_DEV_CLIENT_ID",
+    clientSecretSecretRef: "XERO_RAMWALL_READ_CORE_DEV_CLIENT_SECRET",
+  },
+  {
+    appKey: "ramwall_read_core_dev_2",
+    displayName: "Ramwall Read Core 2 (Development)",
+    clientIdSecretRef: "XERO_RAMWALL_READ_CORE_DEV_2_CLIENT_ID",
+    clientSecretSecretRef: "XERO_RAMWALL_READ_CORE_DEV_2_CLIENT_SECRET",
+  },
+];
+
 async function seed() {
   const now = nowUtcIso();
 
@@ -46,32 +76,37 @@ async function seed() {
       .run();
   }
 
-  db.insert(xeroApps)
-    .values({
-      id: nanoid(),
-      appKey: "ramwall_read_core_dev",
-      displayName: "Ramwall Read Core (Development)",
-      environment: "development",
-      purpose: "read_core",
-      tier: "Starter",
-      connectionLimit: 5,
-      scopeProfile: "read_core_v2",
-      redirectUri: process.env.XERO_REDIRECT_URI ?? "http://localhost:3000/api/xero/oauth/callback",
-      clientIdSecretRef: "XERO_RAMWALL_READ_CORE_DEV_CLIENT_ID",
-      clientSecretSecretRef: "XERO_RAMWALL_READ_CORE_DEV_CLIENT_SECRET",
-      operationalOwner: "unverified — decision required",
-      complianceStatus: "draft",
-      enabled: true,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing()
-    .run();
+  for (const app of DEVELOPMENT_XERO_APPS) {
+    db.insert(xeroApps)
+      .values({
+        id: nanoid(),
+        appKey: app.appKey,
+        displayName: app.displayName,
+        environment: "development",
+        purpose: "read_core",
+        tier: "Starter",
+        connectionLimit: 5,
+        scopeProfile: "read_core_v2",
+        redirectUri:
+          process.env.XERO_REDIRECT_URI ?? "http://localhost:3000/api/xero/oauth/callback",
+        clientIdSecretRef: app.clientIdSecretRef,
+        clientSecretSecretRef: app.clientSecretSecretRef,
+        operationalOwner: "unverified — decision required",
+        complianceStatus: "draft",
+        enabled: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
 
   seedAdminUser(now);
   seedDefaultThreshold(now);
 
-  console.log(`Seeded ${CANDIDATE_ENTITIES.length} candidate entities and 1 Xero app (development).`);
+  console.log(
+    `Seeded ${CANDIDATE_ENTITIES.length} candidate entities and ${DEVELOPMENT_XERO_APPS.length} Xero apps (development).`
+  );
 }
 
 /**

@@ -51,9 +51,25 @@ interface Entity {
   shortCode: string;
 }
 
+interface XeroAppRow {
+  appKey: string;
+  displayName: string;
+  environment: string;
+  tier: string;
+  connectionLimit: number;
+  connectionsUsed: number;
+  connectionsRemaining: number;
+  atCapacity: boolean;
+  configured: boolean;
+  clientIdEnvVar: string;
+  clientSecretEnvVar: string;
+}
+
 export default function XeroPage() {
   const [connections, setConnections] = useState<XeroConnectionRow[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
+  const [apps, setApps] = useState<XeroAppRow[]>([]);
+  const [selectedAppKey, setSelectedAppKey] = useState("");
   const [assignEntityByConn, setAssignEntityByConn] = useState<Record<string, string>>({});
   const [assignResult, setAssignResult] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -61,7 +77,22 @@ export default function XeroPage() {
   function reload() {
     fetch("/api/xero/connections").then((r) => r.json()).then((d) => setConnections(d.connections));
     fetch("/api/entities").then((r) => r.json()).then((d) => setEntities(d.entities));
+    fetch("/api/xero/apps")
+      .then((r) => r.json())
+      .then((d) => {
+        setApps(d.apps);
+        // Default to the first app that can actually take a connection, rather
+        // than to the first in the list. Selecting a full or unconfigured app by
+        // default sends someone to a failure they did not choose.
+        setSelectedAppKey((current) => {
+          if (current) return current;
+          const usable = d.apps.find((a: XeroAppRow) => !a.atCapacity && a.configured);
+          return (usable ?? d.apps[0])?.appKey ?? "";
+        });
+      });
   }
+
+  const selectedApp = apps.find((a) => a.appKey === selectedAppKey) ?? null;
 
   // Posted through fetch rather than a plain form so a 409 from the capacity
   // gate can be shown in place, instead of replacing the page with raw JSON.
@@ -69,7 +100,14 @@ export default function XeroPage() {
     e.preventDefault();
     setConnectError(null);
 
-    const res = await fetch("/api/xero/apps/ramwall_read_core_dev/oauth/start", { method: "POST" });
+    if (!selectedAppKey) {
+      setConnectError("No Xero app is registered. Run the database seed first.");
+      return;
+    }
+
+    const res = await fetch(`/api/xero/apps/${encodeURIComponent(selectedAppKey)}/oauth/start`, {
+      method: "POST",
+    });
     if (res.redirected) {
       window.location.href = res.url;
       return;
@@ -95,35 +133,65 @@ export default function XeroPage() {
   return (
     <div className="space-y-8">
       <PageHeading title="Xero Connections">
-        One development Starter app is seeded with read-only scopes. Connect it to the Xero Demo
-        Company or a real organisation, then assign the resulting connection to an entity.
+        Development Starter apps are seeded with read-only scopes. Connect one to the Xero Demo
+        Company or a real organisation, then assign the resulting connection to an entity. Capacity
+        is per app and there is no automatic spillover — choosing which app an organisation connects
+        through is a decision, not something the router makes for you.
       </PageHeading>
 
-      {connections.length > 0 && (
-        <div className="rounded border border-slate-200 bg-white px-4 py-3 text-sm shadow-panel">
-          <span className="text-slate-500">Connection capacity </span>
-          <span className="figures font-medium text-slate-900">
-            {connections[0]!.capacity.used} of {connections[0]!.capacity.limit}
-          </span>
-          <span className="text-slate-400"> on the {connections[0]!.appTier} tier</span>
-          {connections[0]!.capacity.remaining === 0 && (
-            <span className="ml-2">
-              <StatusPill tone="stale">
-                full, connecting another organisation needs a tier decision
-              </StatusPill>
-            </span>
-          )}
+      {apps.length > 0 && (
+        <div className="space-y-2 rounded border border-slate-200 bg-white px-4 py-3 text-sm shadow-panel">
+          {/* Capacity is per registration, so each app reports its own. A single
+              figure taken from one app misrepresents every other one. */}
+          {apps.map((app) => (
+            <div key={app.appKey} className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-slate-900">{app.displayName}</span>
+              <span className="figures text-slate-500">
+                {app.connectionsUsed} of {app.connectionLimit}
+              </span>
+              <span className="text-slate-400">on the {app.tier} tier</span>
+              {app.atCapacity && (
+                <StatusPill tone="stale">full, another organisation needs a tier decision</StatusPill>
+              )}
+              {!app.configured && <StatusPill tone="exception">credentials not set</StatusPill>}
+            </div>
+          ))}
         </div>
       )}
 
       <div className="space-y-3">
-        <form onSubmit={connect}>
-          <Button type="submit">Connect Xero organisation</Button>
+        <form onSubmit={connect} className="flex flex-wrap items-end gap-3">
+          {apps.length > 1 && (
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-500">Connect through</span>
+              <Select
+                value={selectedAppKey}
+                onChange={(e) => setSelectedAppKey(e.target.value)}
+                className="min-w-64"
+              >
+                {apps.map((app) => (
+                  <option key={app.appKey} value={app.appKey}>
+                    {app.displayName} — {app.connectionsRemaining} free
+                    {app.configured ? "" : " (no credentials)"}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
+          <Button type="submit" disabled={!selectedApp || selectedApp.atCapacity}>
+            Connect Xero organisation
+          </Button>
         </form>
         {connectError && <Notice tone="error">{connectError}</Notice>}
+        {selectedApp && !selectedApp.configured && (
+          <Notice tone="warn">
+            {selectedApp.displayName} has no credentials. Set {selectedApp.clientIdEnvVar} and{" "}
+            {selectedApp.clientSecretEnvVar} in .env.local, then restart the dev server.
+          </Notice>
+        )}
         <p className="max-w-prose text-xs text-slate-400">
-          Requires XERO_RAMWALL_READ_CORE_DEV_CLIENT_ID, _CLIENT_SECRET and
-          XERO_TOKEN_ENCRYPTION_KEY_V1 to be set. See .env.example.
+          Each app needs its own client ID and secret, plus XERO_TOKEN_ENCRYPTION_KEY_V1. See
+          .env.example.
         </p>
       </div>
 
