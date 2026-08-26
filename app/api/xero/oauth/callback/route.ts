@@ -47,10 +47,55 @@ export async function GET(request: Request) {
     .run();
 
   const app = await resolveXeroAppById(stateRow.xeroAppId);
-  const client = buildXeroClient(app);
 
-  const tokenSet = await client.apiCallback(request.url);
-  const tenants = await client.updateTenants(false);
+  /**
+   * Everything past this point can fail, and until now none of it was caught:
+   * the route threw, Next returned a bare 500, and the only description of
+   * what went wrong was in the server's own console. The person it happened to
+   * saw an empty error page after handing their accounting credentials over.
+   *
+   * The state is deliberately still consumed above rather than here. It is a
+   * one-time value and replay protection has to hold even when the exchange
+   * fails, so a failure means restarting the connection — which the message
+   * below says, instead of leaving someone to retry a URL that cannot work.
+   */
+  let tokenSet;
+  let tenants;
+  try {
+    /**
+     * The state has to be handed back to the client, not just checked above.
+     * `apiCallback` verifies the state on the callback URL against
+     * `config.state` (XeroClient.js:103), so a client built without it rejects
+     * every callback with "checks.state argument is missing" — the exchange
+     * never even reaches Xero.
+     *
+     * The value comes from the stored one-time record rather than from the
+     * query string, so the check compares Xero's parameter against what this
+     * server issued rather than against itself.
+     */
+    const client = buildXeroClient(app, stateRow.state);
+    tokenSet = await client.apiCallback(request.url);
+    tenants = await client.updateTenants(false);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+
+    await recordAuditEvent({
+      actorEmail: stateRow.initiatingUserEmail,
+      action: "xero_oauth.callback_failed",
+      resourceType: "xero_app",
+      resourceId: app.id,
+      detail: { message },
+    });
+
+    return NextResponse.json(
+      {
+        error: `Xero authorisation could not be completed: ${message}`,
+        appKey: app.appKey,
+        hint: "The one-time state has been consumed, so this link cannot be retried. Start the connection again from /xero.",
+      },
+      { status: 502 }
+    );
+  }
 
   const now = nowUtcIso();
   const encrypted = encryptTokenSet(JSON.stringify(tokenSet), CURRENT_KEY_VERSION);
