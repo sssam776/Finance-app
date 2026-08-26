@@ -1,0 +1,27 @@
+# Caddy obtains and renews a Let's Encrypt certificate for SITE_ADDRESS
+# automatically. Nothing here needs a certbot cron job.
+#
+# SITE_ADDRESS must be a hostname, not a bare IP — Let's Encrypt will not issue
+# for an IP address. On a VM with no domain, sslip.io gives you one for free:
+# 203.0.113.10.sslip.io resolves to 203.0.113.10, and Caddy can certify it.
+
+{$SITE_ADDRESS} {
+	encode gzip
+
+	reverse_proxy app:3000 {
+		# Next.js reads these to build absolute URLs. Without the forwarded
+		# proto it can construct http:// links behind a TLS terminator.
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+
+	# The app holds financial records for a real company. These cost nothing
+	# and close off the obvious passive attacks.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+}

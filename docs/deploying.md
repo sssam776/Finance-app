@@ -108,6 +108,68 @@ fly sftp get /data/backup.db
 during the Xero consent round-trip can outlast the OAuth state's ten-minute
 TTL. Setting it to `"stop"` lowers the bill and trades that away.
 
+## On a plain VM (Oracle Cloud, Hetzner, any Docker host)
+
+`deploy/` holds a Compose file that runs the app behind Caddy, which obtains
+and renews a TLS certificate by itself. No certbot, no cron job.
+
+```bash
+# on the server
+sudo apt update && sudo apt install -y docker.io docker-compose-v2 git
+sudo usermod -aG docker $USER && newgrp docker
+
+git clone https://github.com/sssam776/Finance-app.git
+cd Finance-app/deploy
+cp .env.deploy.example .env
+nano .env                      # fill in, then:
+docker compose up -d --build
+```
+
+Then the same post-deploy steps as above — seed the admin, set the redirect
+URI, clear demo data — but through Compose:
+
+```bash
+docker compose exec app npx tsx db/seed.ts
+docker compose exec app npx tsx scripts/set-redirect-uri.ts https://$SITE_ADDRESS
+docker compose exec app npx tsx scripts/demo-data.ts --clear
+```
+
+### You need a hostname, not just an IP
+
+Let's Encrypt will not issue a certificate for a bare IP address, and without
+a certificate there is no HTTPS, and without HTTPS nobody can sign in. If you
+have no domain, `sslip.io` gives you one instantly and free: `203.0.113.10.sslip.io`
+resolves to `203.0.113.10`. Put that in `SITE_ADDRESS` and Caddy will certify it.
+
+### Oracle Cloud specifics
+
+**Open the firewall in two places.** This is the mistake that costs people an
+afternoon. Adding an ingress rule to the OCI security list is only half of it —
+Oracle's Ubuntu images also ship iptables rules that drop everything except SSH,
+and they persist across reboots.
+
+```bash
+# 1. OCI console: VCN -> Security List -> add ingress 0.0.0.0/0 on TCP 80 and 443
+# 2. on the instance itself:
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+sudo netfilter-persistent save
+```
+
+If the site times out rather than refusing the connection, it is almost always
+this.
+
+**Always Free Ampere instances are ARM.** The Dockerfile is architecture
+neutral and `node:22-slim` is multi-arch, but `better-sqlite3` compiles from
+source, so build **on** the VM rather than pushing an image built on an x86
+machine. `docker compose up --build` above does that. The first build is slow
+on a shared ARM core — several minutes is normal.
+
+**Oracle reclaims idle Always Free instances**, and in June 2026 halved the
+Ampere allowance to 2 OCPUs / 12 GB and terminated over-limit instances without
+announcing it. Treat an Always Free VM as a demo environment. Do not let it
+hold the only copy of a client's financial records.
+
 ## Access
 
 The app requires a login on every route, so a public URL is not public access —
