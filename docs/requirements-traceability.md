@@ -21,12 +21,33 @@ deliberately deferred — see `implementation-plan.md` for phasing.
 | ID | Requirement | Status | Evidence |
 |---|---|---|---|
 | §7.3 | Xero app registry | built (single app) | `xero_apps` table, `db/seed.ts` |
-| §7.6 | Multi-app entity allocation rules | partial | `entity_xero_app_assignments` enforces one active assignment per entity/purpose (`app/api/xero/assignments/route.ts`); only one app exists so multi-app spillover/capacity rules are unexercised |
+| §7.6 | Multi-app entity allocation rules | partial | `entity_xero_app_assignments` enforces one active assignment per entity/purpose (`app/api/xero/assignments/route.ts`); only one app exists so multi-app spillover rules are unexercised |
+| §7.6.7 | Connection capacity checked before OAuth | built | `capacityFailureReason` in `lib/xero/compliance.ts`, called in the OAuth start route before the consent URL is built, so a full app never sends someone to Xero to approve access that cannot be stored. Returns 409 and records an audit event. There is deliberately no spillover to an app with spare room |
+| §17.6 | Connection health and staleness | built | `lib/xero/connectionHealth.ts` plus capacity used/remaining and the last sync run on `app/api/xero/connections/route.ts`, rendered on `/xero`. Terminal statuses outrank staleness, and a future-dated sync is reported as a clock problem |
 | §8.2-8.7 | OAuth flow, state, secret resolution | built | `app/api/xero/apps/[appKey]/oauth/start`, `app/api/xero/oauth/callback`, `lib/xero/appRegistry.ts` |
-| §8.5 | Token-refresh concurrency lock | **not started** | `lib/xero/gateway.ts` refreshes without a Durable Object/D1 lease — documented gap |
+| §8.5 | Token-refresh concurrency lock | built | Compare-and-swap on `xero_authorizations.refresh_version` in `lib/xero/gateway.ts` — exactly one caller may move the version from N to N+1, so exactly one caller refreshes; losers wait for that result via `awaitPeerRefresh`. Becomes the same CAS against D1 on Cloudflare (ADR-002), so no Durable Object is required |
 | §8.6 | Token encryption | partial | AES-256-GCM via Node `crypto`, key-version envelope (`lib/xero/crypto.ts`); needs Web Crypto port for Workers |
-| §9.6 | Production compliance gate | **not started** | No `XERO_MULTI_APP_ENABLED` flag or compliance-status enforcement at runtime yet; `compliance_status` column exists but nothing reads it |
+| §9.6 | Production compliance gate | built (single-app scope) | `lib/xero/compliance.ts`, enforced in `lib/xero/appRegistry.ts::buildXeroClient` — the one choke point every Xero call passes through. Checks `enabled`, terminal statuses in all environments, and in production: `compliance_status='approved'`, operational owner, scope profile, approval reference, and `XERO_MULTI_APP_ENABLED` consistency with the enabled production app count. The "successful app-routing and tenant-isolation test run" condition is **not** machine-checked — there is no test-run record to read |
 | §10.1 | Xero app router (fail closed) | built | `lib/xero/gateway.ts::resolveXeroRoute` |
+
+## Identity and access (Part XI §15.1)
+
+| ID | Requirement | Status | Evidence |
+|---|---|---|---|
+| §15.1 | Authenticated users | built | `users` table; scrypt password hashing in `lib/auth.ts` (Node stdlib, no native dependency); first admin created by `db/seed.ts` from `ADMIN_EMAIL`/`ADMIN_INITIAL_PASSWORD`, with a generated password printed once and never reset by re-seeding |
+| §15.1 | Sessions | built | `sessions` table keyed by the SHA-256 of the token, so the raw token exists only in the user's httpOnly cookie; 8-hour TTL; disabled users lose access on their next request, not their next login |
+| §15.1 | Actor identity on every write | built | `lib/session.ts::requireSession` — reads take `viewer`, writes take `admin`. No route accepts an actor email from a request body or form field any more; `audit_events.actor_email` is now always the signed-in user |
+| §15.1 | Roles | partial | Two roles (`admin`, `viewer`) gate read vs. write |
+| §14.1 | Per-entity scoping | built | `entity_permissions` table, rule in `lib/entityAccess.ts`, resolved by `lib/session.ts::entityAccessFor`. Explicit grants are authoritative for that user whatever their role; with no grants an admin sees every entity and a viewer sees none. Enforced on writes as well as reads |
+| §15.1 | Password rotation | built | `app/api/auth/password/route.ts` requires the current password and revokes the user's other sessions; policy in `lib/passwordPolicy.ts` |
+| §15.1 | Login throttling | built | `lib/loginThrottle.ts`, counted from `audit_events` so it cannot disagree with the audit trail. Five failures in fifteen minutes returns 429 with `Retry-After` |
+| §31 | Eight seed roles | **not started** | The spec names Finance Controller, Preparer, Reviewer, Board Viewer, Payroll Preparer, Payroll Approver, System Administrator and Service Account. Only `admin` and `viewer` exist. Spec 31 also says not to build a second identity system without an ADR, so expanding this needs a decision first |
+
+**Known limitation:** `middleware.ts` only checks that a session cookie is
+present, because Next.js middleware runs on the Edge runtime and cannot reach
+SQLite. It is a redirect for signed-out browsers, not an authorisation check.
+Every API route independently resolves the session and rejects a forged or
+expired cookie. Do not move an authorisation decision into middleware.
 
 ## Module A — Cash Position (Part XIII §18)
 
@@ -36,14 +57,35 @@ deliberately deferred — see `implementation-plan.md` for phasing.
 | CASH-002 | Loans excluded from available cash | built | `entity_bank_accounts.isLoanFacility`, filtered in `app/api/cash-position/route.ts` |
 | CASH-003 | Source-date integrity | built | `oldestSourceDate` per row and overall in cash-position response |
 | CASH-004 | Xero-to-bank variance | built | `app/api/cash-position/route.ts` (Bank Summary report vs. latest snapshot) |
-| CASH-005 | Configurable exception thresholds | **not started** | no threshold config table/UI yet |
-| CASH-006 | Variance evidence view | partial | variance shown with dates and amounts; no drill-through to source sync/import run in the UI yet |
+| CASH-005 | Configurable exception thresholds | built | `variance_thresholds` table (entity row overrides the `"*"` group default), resolution and comparison in `lib/thresholds.ts`, read/write via `app/api/thresholds/route.ts`, edited on the Cash Position page. Breaching either the amount or the percent trigger flags an exception |
+| CASH-006 | Variance evidence view | built | `app/api/cash-position/route.ts` returns the bank import (id, checksum, importer, receipt time, parser version, source row) and the Xero sync run (id, tenant, account, status, timings, records read) behind each figure; `app/page.tsx` renders them in an expandable evidence panel per row |
 
-## Everything else (Modules B-L, Parts XIV-XVIII)
+## Module C — P&L Movement and Budget Variance (Part XIII §20)
+
+| ID | Requirement | Status | Evidence |
+|---|---|---|---|
+| VAR-001 | Movement against a comparative period | built | `lib/variance/plMovement.ts`, `app/api/pl-variance/route.ts`. Prior month and same month last year. The favourable/adverse convention lives in `isFavourable` alone: revenue rising and cost rising are the same arithmetic and opposite news |
+| VAR-002 | Budget variance | **not started** | Needs an approved Xero budget or the client's budget workbook; neither exists. The route reports the comparison unavailable with a reason rather than returning a zero comparative, which would read as "budget was nil" |
+| VAR-003 | Materiality ranking | built | `rankByMateriality` puts exceptions above larger non-exceptions, so a small movement breaching a tight entity threshold is not buried under a large one that did not |
+| VAR-004 | Explanations | built | `variance_commentary` table, `app/api/pl-variance/commentary/route.ts`. Separate table and separate route; nothing on the calculation path reads it, and `scripts/verify-variance.ts` asserts the figures are byte-identical after a comment is saved |
+
+## Shared foundations (built ahead of Modules B-L)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Xero report layer | built | `report_snapshots` + `report_rows` (`db/schema.ts`), one walker `rowsOf` in `lib/xero/reports.ts`. Modules B, C and D each specified these tables with different columns; built once, merged |
+| Sync run envelope | built | `lib/xero/syncRun.ts` — start/complete/fail, used by both sync routes |
+| Paged, rate-limited fetching | built | `lib/xero/paged.ts` — page loop, 429 backoff honouring `Retry-After`, call cap, partial on cap-out |
+| Reporting periods | built | `lib/periods.ts` — period keys, ranges, NZ financial years, comparison labels derived at read time |
+| Approval rules | built | `lib/approval.ts` — segregation of duties and effective-dated version resolution, both fail closed |
+| Threshold contexts | built | `variance_thresholds.context`, so cash tolerance cannot stand in for P&L materiality |
+| Structural guards | built | `tests/guards.test.ts` — no write scope, no `XeroClient` outside `lib/xero`, no actor identity from a request body |
+
+## Everything else (Modules B, D-L, Parts XIV-XVIII)
 
 **Not started.** Board reporting, P&L/budget variance, balance-sheet
 substantiation, rules/exceptions, intercompany reconciliation, GST audit,
 debt/lender view, attachments/extraction, AI assistance, controlled
-write-back, payroll timesheets, UI roles/permissions, security hardening
-beyond token encryption, observability/alerting, and the full test/gate
-strategy in Part XVII are all future phases. See `implementation-plan.md`.
+write-back, payroll timesheets, per-entity permissions, observability/alerting,
+and the full test/gate strategy in Part XVII are all future phases. See
+`implementation-plan.md`.

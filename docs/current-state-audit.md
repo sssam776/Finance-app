@@ -31,11 +31,11 @@ silently abandoned in favour of this greenfield build.
 
 | Spec requirement | This build | Status |
 |---|---|---|
-| Next.js 16, React 19, TypeScript | Next.js 15.5 (latest stable at build time), React 19, TypeScript strict | **verified in code** — React 19 available; Next.js 16 not yet released to npm at build time |
+| Next.js 16, React 19, TypeScript | Next.js 15.x, React 19, TypeScript strict | **unverified — decision required**: Next.js 16 was unreleased when this build started but is now on npm (16.3.2). The spec asks for 16, and `npm audit` reports the 15.x line as carrying HIGH advisories fixed only by upgrading. The upgrade touches middleware and the app router, so it is a deliberate piece of work, not a version bump |
 | Cloudflare D1 | Drizzle ORM against local SQLite (better-sqlite3) | **unverified — decision required**: schema is D1-dialect-compatible (see ADR-002) but not deployed to a Worker yet |
 | Cloudflare R2 | Local disk (`lib/rawFileStore.ts`) | **unverified — decision required**: same reasoning as D1 |
 | Cloudflare Web Crypto for token encryption | Node `crypto` AES-256-GCM (`lib/xero/crypto.ts`) | **unverified — decision required**: same envelope shape, swap implementation before deploying to a Worker |
-| Durable Object token-refresh lock | Not implemented | **unverified — decision required**: no concurrent-refresh protection yet; single-user quick version accepted this gap explicitly |
+| Durable Object token-refresh lock | Compare-and-swap on `xero_authorizations.refresh_version` (`lib/xero/gateway.ts`) | **verified in code** — exactly one caller can advance the version, so exactly one refreshes; the rest wait for that result. The same CAS works against D1, so no Durable Object is required for this |
 
 These are pragmatic, documented deviations to get a working vertical slice
 in front of the Financial Controller quickly, not silent scope-cuts — each
@@ -70,6 +70,25 @@ is logged as an open decision in the ADRs and traceability matrix.
 - Cash Position dashboard: bank balance vs. Xero balance variance, oldest
   source-date banner, loan facilities excluded from available cash
   (CASH-001 through CASH-006).
+
+## Added after the first slice — access control and fail-closed gates
+
+- **Authentication (§15.1).** `users` and `sessions` tables, scrypt password
+  hashing via Node's stdlib, session tokens stored only as a SHA-256 so a
+  dump of the sessions table yields no usable cookies, 8-hour expiry, and
+  `admin`/`viewer` roles gating writes from reads.
+- **Actor identity is no longer client-supplied.** Before this, every route
+  took the acting user's email from a request body, form field or a
+  hard-coded `"system@local"`, and three UI files posted a literal address —
+  meaning `audit_events.actor_email` recorded whatever the caller typed.
+  Every route now resolves its actor from the session.
+- **Production compliance gate (§9.6)** in `lib/xero/compliance.ts`,
+  enforced at `buildXeroClient` — the single point every Xero call passes
+  through, so it also closes the gap where `resolveXeroAppById` never
+  checked `enabled`.
+- **Token-refresh concurrency (§8.5)** via compare-and-swap.
+- **CASH-005 and CASH-006** — configurable thresholds and evidence
+  drill-through.
 
 ## What was explicitly not built (see implementation-plan.md)
 

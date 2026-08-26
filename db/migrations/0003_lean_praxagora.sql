@@ -1,0 +1,2 @@
+CREATE INDEX `audit_events_action_actor_idx` ON `audit_events` (`action`,`actor_email`,`created_at`);--> statement-breakpoint
+CREATE INDEX `audit_events_action_created_idx` ON `audit_events` (`action`,`created_at`);

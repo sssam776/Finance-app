@@ -1,6 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  PageHeading,
+  Panel,
+  TableFrame,
+  Thead,
+  Th,
+  Button,
+  Field,
+  Input,
+  Select,
+  StatusPill,
+  EmptyRow,
+} from "../ui";
 
 interface Entity {
   id: string;
@@ -30,7 +43,7 @@ export default function EntitiesPage() {
     xeroAccountCode: "",
     isLoanFacility: false,
   });
-  const [syncStatus, setSyncStatus] = useState<Record<string, string>>({});
+  const [syncStatus, setSyncStatus] = useState<Record<string, { tone: "ok" | "error" | "busy"; text: string }>>({});
 
   function reload() {
     fetch("/api/entities")
@@ -63,7 +76,7 @@ export default function EntitiesPage() {
   }
 
   async function triggerSync(entityId: string) {
-    setSyncStatus((s) => ({ ...s, [entityId]: "syncing…" }));
+    setSyncStatus((s) => ({ ...s, [entityId]: { tone: "busy", text: "syncing…" } }));
     const res = await fetch("/api/xero/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -72,118 +85,131 @@ export default function EntitiesPage() {
     const body = await res.json();
     setSyncStatus((s) => ({
       ...s,
-      [entityId]: res.ok ? `synced ${body.recordsWritten} accounts` : `error: ${body.error}`,
+      [entityId]: res.ok
+        ? { tone: "ok", text: `synced ${body.recordsWritten} accounts` }
+        : { tone: "error", text: body.error ?? "sync failed" },
     }));
   }
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Entities</h1>
-        <p className="text-sm text-slate-500">
-          Seeded from spec 7.1 as <span className="font-mono">unverified</span> — confirm which have a
-          separate Xero organisation before treating any figure as live.
-        </p>
-      </div>
+      <PageHeading title="Entities">
+        Seeded as <span className="font-mono">unverified</span>. Confirm which have a separate Xero
+        organisation before treating any figure as live.
+      </PageHeading>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Entity</th>
-              <th className="px-4 py-3">Short code</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Bank accounts</th>
-              <th className="px-4 py-3">Xero sync</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entities.map((entity) => (
+      <TableFrame>
+        <Thead>
+          <tr>
+            <Th>Entity</Th>
+            <Th>Short code</Th>
+            <Th>Status</Th>
+            <Th align="right">Bank accounts</Th>
+            <Th>Xero sync</Th>
+          </tr>
+        </Thead>
+        <tbody>
+          {entities.map((entity) => {
+            const status = syncStatus[entity.id];
+            return (
               <tr key={entity.id} className="border-t border-slate-100">
-                <td className="px-4 py-3">{entity.legalName}</td>
-                <td className="px-4 py-3 font-mono text-xs">{entity.shortCode}</td>
+                <td className="px-4 py-3 text-slate-900">{entity.legalName}</td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-600">{entity.shortCode}</td>
                 <td className="px-4 py-3">
-                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-700">
+                  <StatusPill tone={entity.status === "active" ? "healthy" : "stale"}>
                     {entity.status}
-                  </span>
+                  </StatusPill>
                 </td>
-                <td className="px-4 py-3">
+                <td className="figures px-4 py-3 text-right text-slate-700">
                   {bankAccounts.filter((b) => b.entityId === entity.id).length}
                 </td>
                 <td className="px-4 py-3">
-                  <button
-                    onClick={() => triggerSync(entity.id)}
-                    className="rounded bg-slate-800 px-2 py-1 text-xs text-white hover:bg-slate-700"
-                  >
+                  <Button variant="secondary" onClick={() => triggerSync(entity.id)}>
                     Sync now
-                  </button>
-                  {syncStatus[entity.id] && (
-                    <div className="mt-1 text-xs text-slate-500">{syncStatus[entity.id]}</div>
+                  </Button>
+                  {status && (
+                    <div
+                      className={`mt-1 max-w-xs text-xs ${
+                        status.tone === "error" ? "text-exception" : "text-slate-500"
+                      }`}
+                    >
+                      {status.text}
+                    </div>
                   )}
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            );
+          })}
+          {entities.length === 0 && <EmptyRow colSpan={5}>No entities seeded yet.</EmptyRow>}
+        </tbody>
+      </TableFrame>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="mb-3 font-medium">Add a bank account mapping</h2>
-        <form onSubmit={addBankAccount} className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          <select
-            className="rounded border border-slate-300 px-2 py-1.5"
-            value={selectedEntityId}
-            onChange={(e) => setSelectedEntityId(e.target.value)}
-            required
-          >
-            <option value="">Select entity…</option>
-            {entities.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.shortCode}
-              </option>
-            ))}
-          </select>
-          <select
-            className="rounded border border-slate-300 px-2 py-1.5"
-            value={form.bankName}
-            onChange={(e) => setForm((f) => ({ ...f, bankName: e.target.value }))}
-          >
-            <option value="ASB">ASB</option>
-            <option value="BNZ">BNZ</option>
-          </select>
-          <input
-            className="rounded border border-slate-300 px-2 py-1.5"
-            placeholder="Account number"
-            value={form.accountNumber}
-            onChange={(e) => setForm((f) => ({ ...f, accountNumber: e.target.value }))}
-            required
-          />
-          <input
-            className="rounded border border-slate-300 px-2 py-1.5"
-            placeholder="Account name / label"
-            value={form.accountName}
-            onChange={(e) => setForm((f) => ({ ...f, accountName: e.target.value }))}
-            required
-          />
-          <input
-            className="rounded border border-slate-300 px-2 py-1.5"
-            placeholder="Xero account code (optional)"
-            value={form.xeroAccountCode}
-            onChange={(e) => setForm((f) => ({ ...f, xeroAccountCode: e.target.value }))}
-          />
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              checked={form.isLoanFacility}
-              onChange={(e) => setForm((f) => ({ ...f, isLoanFacility: e.target.checked }))}
+      <Panel
+        title="Add a bank account mapping"
+        description="The Xero account code is what links a bank balance to its Xero counterpart. Without it the account shows a bank figure and no variance."
+      >
+        <form onSubmit={addBankAccount} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Entity">
+            <Select
+              value={selectedEntityId}
+              onChange={(e) => setSelectedEntityId(e.target.value)}
+              required
+            >
+              <option value="">Select entity…</option>
+              {entities.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.shortCode}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Bank">
+            <Select
+              value={form.bankName}
+              onChange={(e) => setForm((f) => ({ ...f, bankName: e.target.value }))}
+            >
+              <option value="ASB">ASB</option>
+              <option value="BNZ">BNZ</option>
+            </Select>
+          </Field>
+
+          <Field label="Account number">
+            <Input
+              value={form.accountNumber}
+              onChange={(e) => setForm((f) => ({ ...f, accountNumber: e.target.value }))}
+              required
             />
-            Loan facility (excluded from available cash)
-          </label>
-          <button type="submit" className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white hover:bg-slate-700">
-            Add mapping
-          </button>
+          </Field>
+
+          <Field label="Account name">
+            <Input
+              value={form.accountName}
+              onChange={(e) => setForm((f) => ({ ...f, accountName: e.target.value }))}
+              required
+            />
+          </Field>
+
+          <Field label="Xero account code" hint="optional">
+            <Input
+              value={form.xeroAccountCode}
+              onChange={(e) => setForm((f) => ({ ...f, xeroAccountCode: e.target.value }))}
+            />
+          </Field>
+
+          <div className="flex flex-col justify-end gap-3">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={form.isLoanFacility}
+                onChange={(e) => setForm((f) => ({ ...f, isLoanFacility: e.target.checked }))}
+              />
+              Loan facility, excluded from available cash
+            </label>
+            <Button type="submit">Add mapping</Button>
+          </div>
         </form>
-      </div>
+      </Panel>
     </div>
   );
 }

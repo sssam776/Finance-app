@@ -59,12 +59,29 @@ function toDateOnly(raw: string): DateOnly {
   throw new Error(`Unrecognised date format: "${raw}". Expected dd/mm/yyyy or yyyy-mm-dd.`);
 }
 
+/**
+ * A bank statement holds plain fixed-point amounts. Anything else in a balance
+ * column is a malformed or hostile file, not a number to be stored.
+ *
+ * `Number.isNaN(Number(x))` is not sufficient on its own: it accepts
+ * "Infinity", "1e999999999" and "0x10", all of which survive into the database
+ * as strings and then break or explode the cash position when Decimal tries to
+ * materialise them. Matching an explicit grammar first is the only reliable
+ * filter.
+ */
+const FIXED_POINT = /^-?\d{1,15}(\.\d{1,4})?$/;
+
 function toDecimalString(raw: string): string {
   const cleaned = raw.replace(/[,$]/g, "").trim();
-  if (cleaned === "" || Number.isNaN(Number(cleaned))) {
-    throw new Error(`Unrecognised numeric value: "${raw}"`);
+  // Accounting negatives are often exported as (1,234.56).
+  const normalised = /^\(.*\)$/.test(cleaned) ? `-${cleaned.slice(1, -1)}` : cleaned;
+
+  if (!FIXED_POINT.test(normalised)) {
+    throw new Error(
+      `Unrecognised numeric value: "${raw}". Expected a plain amount such as -1234.56, at most 15 digits and 4 decimal places.`
+    );
   }
-  return cleaned;
+  return normalised;
 }
 
 export function parseBankCsv(fileContents: string, currency = "NZD"): ParsedBankCsvResult {

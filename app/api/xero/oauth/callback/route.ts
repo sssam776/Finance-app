@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { eq, and } from "drizzle-orm";
+import { eq, and, notInArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { xeroOauthStates, xeroAuthorizations, xeroConnections } from "@/db/schema";
 import { resolveXeroAppById, buildXeroClient } from "@/lib/xero/appRegistry";
+import { capacityFailureReason } from "@/lib/xero/compliance";
 import { encryptTokenSet, serializeEncryptedPayload, CURRENT_KEY_VERSION } from "@/lib/xero/crypto";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession } from "@/lib/session";
 
 /**
  * The callback resolves the Xero app from the one-time state record created
@@ -14,6 +16,12 @@ import { recordAuditEvent } from "@/lib/audit";
  */
 
 export async function GET(request: Request) {
+  // Xero redirects the browser here as a top-level navigation, so the
+  // SameSite=lax session cookie is sent and this stays enforceable. The
+  // one-time state record is the primary defence; this is the second lock.
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -64,12 +72,37 @@ export async function GET(request: Request) {
     })
     .run();
 
+  // The start route checks capacity before sending anyone to Xero, but two
+  // flows begun while four of five slots were used would both have passed.
+  // Re-checked here, immediately before each insert, because this is the point
+  // where a slot is actually consumed. Reconnecting an organisation that
+  // already has a row occupies no new slot, so it is never blocked.
+  const skippedForCapacity: string[] = [];
+
   for (const tenant of tenants) {
     const existing = db
       .select()
       .from(xeroConnections)
       .where(and(eq(xeroConnections.xeroAppId, app.id), eq(xeroConnections.xeroTenantId, tenant.tenantId)))
       .get();
+
+    if (!existing) {
+      const occupied = db
+        .select({ id: xeroConnections.id })
+        .from(xeroConnections)
+        .where(
+          and(
+            eq(xeroConnections.xeroAppId, app.id),
+            notInArray(xeroConnections.status, ["disconnected", "disabled"])
+          )
+        )
+        .all();
+
+      if (capacityFailureReason(app, occupied.length)) {
+        skippedForCapacity.push(tenant.tenantName ?? tenant.tenantId);
+        continue;
+      }
+    }
 
     if (existing) {
       db.update(xeroConnections)
@@ -107,8 +140,17 @@ export async function GET(request: Request) {
     action: "xero_oauth.callback_completed",
     resourceType: "xero_app",
     resourceId: app.id,
-    detail: { tenantsConnected: tenants.length },
+    detail: {
+      tenantsConnected: tenants.length - skippedForCapacity.length,
+      skippedForCapacity,
+    },
   });
 
-  return NextResponse.redirect(new URL("/xero", request.url));
+  const target = new URL("/xero", request.url);
+  if (skippedForCapacity.length) {
+    // Surfaced rather than silent: the user authorised these organisations in
+    // Xero and would otherwise be left wondering why they never appeared.
+    target.searchParams.set("capacityBlocked", skippedForCapacity.join(", "));
+  }
+  return NextResponse.redirect(target);
 }

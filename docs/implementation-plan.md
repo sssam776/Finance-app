@@ -35,17 +35,48 @@ above.
 
 ## Phase 1 — Harden the read slice
 
-- Configurable exception thresholds (CASH-005) and a variance drill-through
-  to the underlying sync run / import (CASH-006).
-- Concurrent token-refresh locking (§8.5) — Durable Object if/when this
-  moves to Cloudflare, otherwise a D1/SQLite lease with expiry.
+Done since the first slice:
+
+- **Authentication and actor identity.** Email/password sign-in with scrypt
+  hashing, hashed session tokens in httpOnly cookies, and `admin`/`viewer`
+  roles. Every route resolves its actor from the session — no route accepts
+  an actor email from a request body any more.
+- **Production compliance gate (§9.6)** enforced at `buildXeroClient`, the
+  single choke point for every Xero call.
+- **Concurrent token-refresh locking (§8.5)** as a compare-and-swap on
+  `refresh_version`. No Durable Object needed; the same CAS works against D1.
+- **CASH-005** configurable variance thresholds and **CASH-006** drill-through
+  to the originating bank import and Xero sync run.
+
+- **Per-entity scoping (§14.1).** `entity_permissions` plus the rule in
+  `lib/entityAccess.ts`, enforced on writes as well as reads.
+- **Connection capacity (§7.6.7)** checked before the OAuth consent URL is
+  built, so hitting the five-connection Starter ceiling is a recorded admin
+  decision rather than a Xero error page after consent.
+- **Connection health and staleness (§17.6)** surfaced on `/xero`.
+- **Password rotation** with revocation of the user's other sessions, and
+  **login throttling** counted from the audit trail itself.
+
+Still open in this phase:
+
+- The eight seed roles in §31. Only `admin` and `viewer` exist, and §31 says
+  not to build a second identity system without an ADR, so this needs a
+  decision before code.
 - Contacts, invoices, bank transactions, manual journals sync (currently
   only Accounts + Bank Summary are pulled).
-- Connection health dashboard (§17.6) — currently only `status` and
-  `lastSuccessfulCallAt` are stored, not surfaced with staleness warnings.
-- Identity/access: `users`, `roles`, `entity_permissions` — there is
-  currently no authentication at all; every route trusts a client-supplied
-  email string. This must be fixed before any non-local deployment.
+- Password reset for a user who has forgotten theirs. Rotation works; there
+  is no out-of-band recovery, so a locked-out user needs an admin to reset
+  the row directly.
+- Scheduled sync. Everything is manually triggered today.
+
+## Module plans
+
+`module-plans.md` holds a concrete implementation plan for Modules B, C, E, F,
+G, H, I, J and K: real table names with real columns, real route paths, the
+Xero scopes and endpoints each needs, what each is blocked on, and an effort
+estimate. Modules D and L are not covered there yet.
+
+Those are plans, not commitments. Nothing described in them exists.
 
 ## Phase 2 — Board and management reporting (Module B, C, D)
 

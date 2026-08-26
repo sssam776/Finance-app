@@ -6,6 +6,8 @@ import { entityBankAccounts } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { nowUtcIso } from "@/lib/dates";
 import { recordAuditEvent } from "@/lib/audit";
+import { requireSession, entityAccessFor } from "@/lib/session";
+import { canAccessEntity, filterByEntityAccess } from "@/lib/entityAccess";
 
 const createSchema = z.object({
   entityId: z.string().min(1),
@@ -18,6 +20,9 @@ const createSchema = z.object({
 });
 
 export async function GET(request: Request) {
+  const actor = await requireSession();
+  if (actor instanceof NextResponse) return actor;
+
   const url = new URL(request.url);
   const entityId = url.searchParams.get("entityId");
 
@@ -25,14 +30,21 @@ export async function GET(request: Request) {
     ? db.select().from(entityBankAccounts).where(eq(entityBankAccounts.entityId, entityId)).all()
     : db.select().from(entityBankAccounts).all();
 
-  return NextResponse.json({ bankAccounts: rows });
+  return NextResponse.json({ bankAccounts: filterByEntityAccess(entityAccessFor(actor), rows) });
 }
 
 export async function POST(request: Request) {
+  const actor = await requireSession("admin");
+  if (actor instanceof NextResponse) return actor;
+
   const body = await request.json();
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  if (!canAccessEntity(entityAccessFor(actor), parsed.data.entityId)) {
+    return NextResponse.json({ error: "No access to this entity" }, { status: 403 });
   }
 
   const now = nowUtcIso();
@@ -54,7 +66,7 @@ export async function POST(request: Request) {
     .run();
 
   await recordAuditEvent({
-    actorEmail: "system@local",
+    actorEmail: actor.email,
     action: "bank_account.created",
     entityId: parsed.data.entityId,
     resourceType: "entity_bank_account",
