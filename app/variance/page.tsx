@@ -14,6 +14,7 @@ import {
   StatusPill,
   Notice,
   EmptyRow,
+  ExportCsvLink,
 } from "../ui";
 
 interface Entity {
@@ -199,16 +200,24 @@ export default function VariancePage() {
           </Field>
         </div>
 
-        {isAdmin && (
-          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
-            <Button variant="secondary" onClick={syncPl} disabled={syncing || !entityId}>
-              {syncing ? "Syncing…" : "Sync P&L from Xero"}
-            </Button>
-            <span className="text-xs text-slate-400">
-              Pulls the twelve months ending with the selected period.
-            </span>
-          </div>
-        )}
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+          {isAdmin && (
+            <>
+              <Button variant="secondary" onClick={syncPl} disabled={syncing || !entityId}>
+                {syncing ? "Syncing…" : "Sync P&L from Xero"}
+              </Button>
+              <span className="text-xs text-slate-400">
+                Pulls the twelve months ending with the selected period.
+              </span>
+            </>
+          )}
+          {/* Available to viewers as well as admins. Reading a figure and
+              taking it away are the same permission. */}
+          <ExportCsvLink
+            href={`/api/pl-variance?entityId=${encodeURIComponent(entityId)}&period=${encodeURIComponent(period)}&comparison=${encodeURIComponent(comparison)}&format=csv`}
+            disabled={!data?.available}
+          />
+        </div>
         {syncResult && (
           <div className="mt-3">
             <Notice tone={syncResult.ok ? "ok" : "error"}>{syncResult.text}</Notice>

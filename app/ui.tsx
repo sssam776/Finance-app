@@ -95,6 +95,39 @@ export function Button({
   );
 }
 
+/**
+ * A plain anchor rather than a button with a fetch. The browser's own download
+ * handling carries the filename from Content-Disposition, streams without
+ * holding the file in memory, and keeps working when the response is an error
+ * page the user can then read.
+ *
+ * `disabled` is expressed by rendering a span, because an anchor has no
+ * disabled state and one styled to look inert is still clickable.
+ */
+export function ExportCsvLink({
+  href,
+  disabled,
+  children = "Export CSV",
+}: {
+  href: string;
+  disabled?: boolean;
+  children?: ReactNode;
+}) {
+  const base = "rounded border px-3 py-1.5 text-sm font-medium";
+  if (disabled) {
+    return (
+      <span className={`${base} border-slate-200 bg-white text-slate-400`} aria-disabled="true">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <a href={href} download className={`${base} border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}>
+      {children}
+    </a>
+  );
+}
+
 const FIELD =
   "rounded border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400";
 

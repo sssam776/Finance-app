@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ExportCsvLink } from "./ui";
 
 interface Threshold {
   scope: "entity" | "group";
@@ -134,6 +135,11 @@ export default function CashPositionPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-[-0.02em] text-slate-900">Cash Position</h1>
           <p className="mt-1 text-sm text-slate-500">Available cash, loan facilities excluded</p>
+          <div className="mt-3">
+            {/* The export carries the evidence columns with the figures, so a
+                variance taken into a spreadsheet keeps its source. */}
+            <ExportCsvLink href="/api/cash-position?format=csv" />
+          </div>
         </div>
 
         <div className="text-right">
