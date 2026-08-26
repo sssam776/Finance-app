@@ -4,8 +4,8 @@
 
 @layer base {
   body {
-    background-color: #f8fafc; /* neutral-50 */
-    color: #0f172a; /* neutral-900 */
+    background-color: #f8f8f8; /* brand book */
+    color: #102226; /* brand dark */
   }
 
   /**
@@ -14,7 +14,7 @@
    * indicator cannot operate the app at all.
    */
   :focus-visible {
-    outline: 2px solid #1e5c8f;
+    outline: 2px solid #102226;
     outline-offset: 2px;
     border-radius: 4px;
   }
@@ -33,18 +33,20 @@
    * rather than built.
    */
   ::selection {
-    background-color: #cfe0ee; /* accent at low saturation, keeps text readable */
-    color: #0f172a;
+    background-color: #d6dcdd; /* brand dark at low saturation, keeps text readable */
+    color: #102226;
   }
 
   :is(input, textarea) {
-    caret-color: #1e5c8f; /* accent */
+    caret-color: #102226;
   }
 
-  /* Long tables scroll. A default scrollbar in the middle of a finance table
-     reads as a browser artifact rather than part of the page. */
+  /**
+   * Long tables scroll. A default scrollbar in the middle of a finance table
+   * reads as a browser artifact rather than part of the page.
+   */
   * {
-    scrollbar-color: #cbd5e1 transparent;
+    scrollbar-color: #a8a8a8 transparent;
     scrollbar-width: thin;
   }
 
@@ -58,12 +60,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1; /* neutral-300 */
-    border: 3px solid #f8fafc;
+    background-color: #a8a8a8; /* brand neutral */
+    border: 3px solid #f8f8f8;
     border-radius: 8px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: #94a3b8;
+    background-color: #767676;
   }
 }
