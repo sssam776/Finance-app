@@ -1,0 +1,26 @@
+# Secrets must never enter an image layer. Fly injects them at runtime.
+.env
+.env.*
+!.env.example
+
+# The database belongs on the mounted volume, not baked into the image. A
+# committed copy would also ship whatever demo or real data was on the machine
+# that built it.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+node_modules/
+.next/
+.git/
+.github/
+
+# Local agent files, never part of a deploy.
+*.local.md
+.claude/
+.remember/
+.reticle/
+
+npm-debug.log*
+.DS_Store

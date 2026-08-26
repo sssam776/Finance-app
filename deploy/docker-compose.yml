@@ -1,0 +1,61 @@
+# Single-VM deployment: the app behind Caddy, which obtains and renews TLS
+# certificates on its own.
+#
+# HTTPS is not optional here. Session cookies are set `secure` when
+# NODE_ENV=production (lib/session.ts), so over plain HTTP the browser never
+# sends the cookie back and sign-in fails silently — the form appears to work
+# and every subsequent request is unauthenticated. Xero also refuses any
+# non-localhost redirect URI that is not https.
+#
+# Usage:
+#   cd deploy
+#   cp .env.deploy.example .env
+#   # fill in .env, then:
+#   docker compose up -d --build
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Deliberately not published to the host. Only Caddy reaches the app, so
+    # there is no plain-HTTP port open to the internet bypassing TLS.
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      SQLITE_DB_PATH: /data/ramwall.db
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      XERO_REDIRECT_URI: https://${SITE_ADDRESS}/api/xero/oauth/callback
+      XERO_MULTI_APP_ENABLED: ${XERO_MULTI_APP_ENABLED:-false}
+      XERO_TOKEN_ENCRYPTION_KEY_V1: ${XERO_TOKEN_ENCRYPTION_KEY_V1}
+      XERO_RAMWALL_READ_CORE_DEV_CLIENT_ID: ${XERO_RAMWALL_READ_CORE_DEV_CLIENT_ID}
+      XERO_RAMWALL_READ_CORE_DEV_CLIENT_SECRET: ${XERO_RAMWALL_READ_CORE_DEV_CLIENT_SECRET}
+      XERO_RAMWALL_READ_CORE_DEV_2_CLIENT_ID: ${XERO_RAMWALL_READ_CORE_DEV_2_CLIENT_ID:-}
+      XERO_RAMWALL_READ_CORE_DEV_2_CLIENT_SECRET: ${XERO_RAMWALL_READ_CORE_DEV_2_CLIENT_SECRET:-}
+    volumes:
+      # Every entity, encrypted token and audit record lives in this one named
+      # volume. It is the only thing on the machine worth backing up.
+      - ramwall_data:/data
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  ramwall_data:
+  caddy_data:
+  caddy_config:

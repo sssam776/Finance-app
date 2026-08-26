@@ -1,0 +1,53 @@
+# Fly.io deployment.
+#
+# Two constraints drive everything here, and both come from the database being
+# a SQLite file on disk rather than a networked service.
+#
+# The machine count must stay at exactly one. Two machines would each mount
+# their own volume and diverge, and two processes against one file would
+# corrupt it. Fly does not enforce this — `fly scale count 1` does, and it has
+# to be checked after any deploy that might have added a machine.
+#
+# The volume must be mounted before the app starts, because migrations run at
+# container start against SQLITE_DB_PATH.
+
+app = "ramwall-finance"
+
+# Sydney is the closest region to New Zealand that Fly offers.
+primary_region = "syd"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  SQLITE_DB_PATH = "/data/ramwall.db"
+
+[[mounts]]
+  source = "ramwall_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+
+  # Not optional. Session cookies are set `secure` when NODE_ENV=production
+  # (lib/session.ts), so over plain HTTP the cookie is never returned and
+  # nobody can sign in at all. The Xero redirect URI must also be https.
+  force_https = true
+
+  # Left running rather than suspended on idle. A cold start in the middle of
+  # the Xero consent round-trip can outlast the OAuth state's ten-minute TTL,
+  # and a client clicking through a demo should not wait on a boot. Set
+  # auto_stop_machines = "stop" to trade that away for a lower bill.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 25
+    hard_limit = 50
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
