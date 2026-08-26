@@ -12,6 +12,7 @@ import {
   Input,
   Select,
   StatusPill,
+  Notice,
   EmptyRow,
 } from "../ui";
 
@@ -44,6 +45,43 @@ export default function EntitiesPage() {
     isLoanFacility: false,
   });
   const [syncStatus, setSyncStatus] = useState<Record<string, { tone: "ok" | "error" | "busy"; text: string }>>({});
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  /**
+   * Confirming an entity records a judgement about the client's corporate
+   * structure, so the note is asked for rather than invented. The route also
+   * requires it when leaving `unverified`, so a caller that skips the prompt
+   * still cannot write an unexplained change.
+   */
+  async function setEntityStatus(entity: Entity, status: string) {
+    setStatusError(null);
+
+    let note: string | undefined;
+    if (entity.status === "unverified") {
+      const answer = window.prompt(
+        `Confirming ${entity.shortCode}. What confirms it?\n\n` +
+          "e.g. the Xero organisation it was matched to, or who confirmed the structure."
+      );
+      if (answer === null) return;
+      if (answer.trim() === "") {
+        setStatusError("A note is required to confirm an entity.");
+        return;
+      }
+      note = answer.trim();
+    }
+
+    const res = await fetch(`/api/entities/${encodeURIComponent(entity.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, note }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setStatusError(body.error ?? "Could not change the entity status.");
+      return;
+    }
+    reload();
+  }
 
   function reload() {
     fetch("/api/entities")
@@ -116,9 +154,22 @@ export default function EntitiesPage() {
                 <td className="px-4 py-3 text-slate-900">{entity.legalName}</td>
                 <td className="px-4 py-3 font-mono text-xs text-slate-600">{entity.shortCode}</td>
                 <td className="px-4 py-3">
-                  <StatusPill tone={entity.status === "active" ? "healthy" : "stale"}>
-                    {entity.status}
-                  </StatusPill>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill tone={entity.status === "active" ? "healthy" : "stale"}>
+                      {entity.status}
+                    </StatusPill>
+                    <Select
+                      value={entity.status}
+                      onChange={(e) => setEntityStatus(entity, e.target.value)}
+                      aria-label={`Status for ${entity.shortCode}`}
+                      className="text-xs"
+                    >
+                      <option value="unverified">unverified</option>
+                      <option value="active">active</option>
+                      <option value="dormant">dormant</option>
+                      <option value="excluded">excluded</option>
+                    </Select>
+                  </div>
                 </td>
                 <td className="figures px-4 py-3 text-right text-slate-700">
                   {bankAccounts.filter((b) => b.entityId === entity.id).length}
@@ -143,6 +194,7 @@ export default function EntitiesPage() {
           {entities.length === 0 && <EmptyRow colSpan={5}>No entities seeded yet.</EmptyRow>}
         </tbody>
       </TableFrame>
+      {statusError && <Notice tone="error">{statusError}</Notice>}
 
       <Panel
         title="Add a bank account mapping"
