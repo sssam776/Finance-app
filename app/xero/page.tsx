@@ -108,11 +108,15 @@ export default function XeroPage() {
     const res = await fetch(`/api/xero/apps/${encodeURIComponent(selectedAppKey)}/oauth/start`, {
       method: "POST",
     });
-    if (res.redirected) {
-      window.location.href = res.url;
+    const body = await res.json().catch(() => ({}));
+
+    // The route returns the consent URL rather than redirecting to it, because
+    // fetch cannot follow a redirect to another origin — see the comment in
+    // that route. Navigating here is what actually opens Xero's consent screen.
+    if (res.ok && body.consentUrl) {
+      window.location.href = body.consentUrl;
       return;
     }
-    const body = await res.json().catch(() => ({}));
     setConnectError(body.error ?? "Could not start the Xero connection.");
   }
 

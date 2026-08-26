@@ -89,5 +89,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ app
     resourceId: app.id,
   });
 
-  return NextResponse.redirect(consentUrl, 303);
+  // Handed back as JSON for the caller to navigate to, rather than returned as
+  // a 303.
+  //
+  // A cross-origin redirect cannot be followed by fetch(). The browser follows
+  // the 303 to login.xero.com, which sends no CORS headers, so the request
+  // rejects as a network error before any status or Location can be read — the
+  // consent screen never opens and the caller cannot say why.
+  //
+  // Navigating from the client keeps the capacity 409 and the credential 500
+  // readable in the page, which is the reason this is a fetch rather than a
+  // plain form post in the first place.
+  return NextResponse.json({ consentUrl });
 }
