@@ -3,12 +3,12 @@
  *
  * Two things make this more than a join with commas.
  *
- * A spreadsheet treats a cell beginning with `=`, `+`, `-`, `@`, tab or
- * carriage return as a formula. Account names in this app come from Xero,
+ * A spreadsheet treats a cell beginning with `=`, `+`, `-`, `@`, tab, carriage
+ * return or line feed as a formula. Account names in this app come from Xero,
  * where they are free text a user can edit, so an exported file can carry a
  * cell that executes when the recipient opens it. That is a real attack on a
  * finance team, who open exports for a living and are precisely the people
- * with something worth taking. Every field is checked and neutralised.
+ * with something worth taking.
  *
  * The other is the byte order mark. Excel on Windows reads a UTF-8 file
  * without one as the system codepage, so an account name with a macron or a
@@ -16,7 +16,23 @@
  */
 
 /** Cells opening with these are interpreted as formulas rather than text. */
-const FORMULA_TRIGGERS = ["=", "+", "-", "@", "\t", "\r"];
+const FORMULA_TRIGGERS = ["=", "+", "-", "@", "\t", "\r", "\n"];
+
+/**
+ * Stripped before the trigger test, never from the emitted value.
+ *
+ * The test used to be `startsWith` on the raw string, so a single leading byte
+ * walked straight past it: a space, a non-breaking space, a BOM or any C0
+ * control before the `=` and the cell was emitted untouched. Nothing upstream
+ * trims either. `lib/xero/reports.ts` stores the account name exactly as Xero
+ * returns it, and `app/api/bank-accounts/route.ts` validates with a bare
+ * `z.string().min(1)`, so those values reach an export as typed.
+ *
+ * Whether a given spreadsheet then evaluates such a cell depends on its own
+ * leading-whitespace handling on import. Depending on that is the defect: this
+ * defence must not rest on an assumption the code neither states nor controls.
+ */
+const IGNORABLE_PREFIX = /^[\s\u0000-\u001f\u007f\u00a0\u1680\u2000-\u200f\u2028\u2029\u202f\u205f\u3000\ufeff]+/;
 
 /**
  * A plain decimal number, which is what every money and percentage column in
@@ -30,16 +46,27 @@ const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
 export function escapeCsvField(value: unknown): string {
   if (value === null || value === undefined) return "";
 
-  let text = String(value);
+  const text = String(value);
+  if (PLAIN_NUMBER.test(text)) return text;
+
+  const probe = text.replace(IGNORABLE_PREFIX, "");
+  const dangerous = FORMULA_TRIGGERS.some((trigger) => probe.startsWith(trigger));
 
   /**
-   * Prefixed with a tab rather than stripped. Removing the character would
-   * change the value, and a finance export that silently alters figures is
-   * worse than one that fails. The tab defuses the formula and spreadsheets
-   * do not display it.
+   * A defused cell is always quoted, and the tab goes inside the quotes.
+   *
+   * A bare tab prefix is not a defence on its own: tab is itself a trigger, so
+   * an unquoted field can still open with one. Quoting is what makes the tab
+   * an ordinary leading character of a text cell rather than the start of the
+   * record, and it is the form the OWASP guidance describes.
+   *
+   * The tab does become part of the value, which `LEN()` and an exact-match
+   * `VLOOKUP` will see. That is a real cost, accepted deliberately: stripping
+   * the character instead would silently alter a figure, and altering finance
+   * data to make it safe is worse than a cell that reads oddly.
    */
-  if (!PLAIN_NUMBER.test(text) && FORMULA_TRIGGERS.some((t) => text.startsWith(t))) {
-    text = `\t${text}`;
+  if (dangerous) {
+    return `"\t${text.replace(/"/g, '""')}"`;
   }
 
   if (/[",\n\r]/.test(text)) {
