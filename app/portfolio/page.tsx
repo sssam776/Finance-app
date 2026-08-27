@@ -16,6 +16,7 @@ import {
   EmptyRow,
   ExportCsvLink,
 } from "../ui";
+import { PositionPanel, type PositionResponse } from "./PositionPanel";
 
 interface Entity {
   id: string;
@@ -91,6 +92,19 @@ export default function PortfolioPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [showDistant, setShowDistant] = useState(false);
+  const [position, setPosition] = useState<PositionResponse | null>(null);
+  const [propertyForm, setPropertyForm] = useState({
+    entityId: "",
+    name: "",
+    lenderName: "",
+    status: "investment",
+    value: "",
+    valuationDate: "",
+    annualNoi: "",
+    targetLvr: "0.65",
+    stressRate: "0.07",
+  });
+  const [propertyMessage, setPropertyMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const [form, setForm] = useState({
     entityId: "",
@@ -111,7 +125,45 @@ export default function PortfolioPage() {
       .then((r) => r.json())
       .then(setData)
       .catch(() => setData(null));
+    fetch("/api/portfolio/position")
+      .then((r) => r.json())
+      .then(setPosition)
+      .catch(() => setPosition(null));
   }, []);
+
+  async function addProperty(e: React.FormEvent) {
+    e.preventDefault();
+    setPropertyMessage(null);
+
+    // Optional fields are omitted rather than sent empty: the schema validates
+    // shape, and "" is neither a decimal nor a date.
+    const body: Record<string, unknown> = {
+      entityId: propertyForm.entityId,
+      name: propertyForm.name,
+      lenderName: propertyForm.lenderName,
+      status: propertyForm.status,
+      value: propertyForm.value,
+      targetLvr: propertyForm.targetLvr,
+      stressRate: propertyForm.stressRate,
+    };
+    for (const key of ["valuationDate", "annualNoi"] as const) {
+      if (propertyForm[key].trim() !== "") body[key] = propertyForm[key].trim();
+    }
+
+    const res = await fetch("/api/portfolio/properties", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setPropertyMessage({ ok: false, text: payload.error ?? "Could not save the property." });
+      return;
+    }
+    setPropertyMessage({ ok: true, text: `${propertyForm.name} added.` });
+    setPropertyForm((f) => ({ ...f, name: "", value: "", valuationDate: "", annualNoi: "" }));
+    reload();
+  }
 
   useEffect(() => {
     fetch("/api/entities")
@@ -177,10 +229,14 @@ export default function PortfolioPage() {
   return (
     <div className="space-y-8">
       <PageHeading title="Debt and Facilities">
-        Rate re-fixes and term expiries, ordered by how soon they land. A facility that rolled over
-        without anyone deciding to roll it is the avoidable version of a funding problem, and these
-        dates are known months ahead.
+        Gearing and covenant position per security pool, then the facilities behind it. Lenders
+        hold a pool of properties rather than any single building, so a question about one property
+        can only be answered from the whole pool.
       </PageHeading>
+
+      <PositionPanel data={position} asOf={position?.asOf ?? ""} />
+
+      <h2 className="pt-2 text-lg font-semibold text-slate-900">Facility expiry watch</h2>
 
       {data && data.withinTwelveMonths.length > 0 && (
         <div className="rounded border border-slate-200 bg-white px-4 py-3 shadow-panel">
@@ -269,6 +325,110 @@ export default function PortfolioPage() {
           </tbody>
         </TableFrame>
       </div>
+
+      {isAdmin && (
+        <Panel title="Add a property to the security register">
+          <form onSubmit={addProperty} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Entity">
+              <Select
+                value={propertyForm.entityId}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, entityId: e.target.value }))}
+                required
+              >
+                <option value="">Select…</option>
+                {entities.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.shortCode}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field label="Property">
+              <Input
+                value={propertyForm.name}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="367 Great South Road"
+                required
+              />
+            </Field>
+
+            <Field label="Charged to lender" hint="creates the pool on first use">
+              <Input
+                value={propertyForm.lenderName}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, lenderName: e.target.value }))}
+                placeholder="ASB"
+                required
+              />
+            </Field>
+
+            <Field label="Purpose" hint="development sits outside the investment LVR">
+              <Select
+                value={propertyForm.status}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, status: e.target.value }))}
+              >
+                <option value="investment">Investment</option>
+                <option value="development">Development</option>
+                <option value="held_for_sale">Held for sale</option>
+              </Select>
+            </Field>
+
+            <Field label="Bank valuation" hint="the basis a covenant is tested on, not sale price">
+              <Input
+                value={propertyForm.value}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, value: e.target.value }))}
+                placeholder="3425000.00"
+                required
+              />
+            </Field>
+
+            <Field label="Valued on">
+              <Input
+                type="date"
+                value={propertyForm.valuationDate}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, valuationDate: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Annual NOI" hint="leave blank if income is not yet mapped">
+              <Input
+                value={propertyForm.annualNoi}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, annualNoi: e.target.value }))}
+                placeholder="250000.00"
+              />
+            </Field>
+
+            <Field label="Pool target LVR" hint="applied only when the pool is created">
+              <Input
+                value={propertyForm.targetLvr}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, targetLvr: e.target.value }))}
+                placeholder="0.65"
+              />
+            </Field>
+
+            <Field label="Pool stress rate" hint="internal assumption, not a facility term">
+              <Input
+                value={propertyForm.stressRate}
+                onChange={(e) => setPropertyForm((f) => ({ ...f, stressRate: e.target.value }))}
+                placeholder="0.07"
+              />
+            </Field>
+
+            <div className="sm:col-span-2 lg:col-span-3">
+              <Button type="submit">Add property</Button>
+              <p className="mt-2 max-w-prose text-xs text-slate-400">
+                Bank value is what the lender holds the security at and is what the covenant is
+                tested against. It is not the sale price, and the two are not interchangeable.
+              </p>
+            </div>
+          </form>
+          {propertyMessage && (
+            <div className="mt-3">
+              <Notice tone={propertyMessage.ok ? "ok" : "error"}>{propertyMessage.text}</Notice>
+            </div>
+          )}
+        </Panel>
+      )}
 
       {isAdmin && (
         <Panel title="Add a facility">

@@ -9,6 +9,7 @@ import { canAccessEntity, filterByEntityAccess } from "@/lib/entityAccess";
 import { recordAuditEvent } from "@/lib/audit";
 import { nowUtcIso, isValidDateOnly, nzDateOnlyNow } from "@/lib/dates";
 import { expiryWatch, valueWithin, BOARD_HORIZON_DAYS } from "@/lib/portfolio/expiry";
+import { resolveLender, resolvePool } from "@/lib/portfolio/registry";
 import { csvResponse, csvFilename } from "@/lib/csv/toCsv";
 
 /**
@@ -42,6 +43,16 @@ class DuplicateFacility extends Error {}
 const facilitySchema = z.object({
   entityId: z.string().min(1),
   lenderName: z.string().trim().min(1).max(120),
+  /**
+   * The security pool this facility is drawn against. Defaults to the
+   * lender's own pool, which is the ordinary case: a bank's facilities are
+   * secured over the properties charged to that bank.
+   *
+   * Without this the facility carried no pool and every pool position
+   * reported zero debt against real security, which reads as enormous
+   * headroom rather than as missing data.
+   */
+  poolName: z.string().trim().min(1).max(120).optional(),
   facilityReference: z.string().trim().min(1).max(120),
   facilityType: z
     .enum(["term_loan", "revolving_credit", "overdraft", "development", "other"])
@@ -226,27 +237,13 @@ export async function POST(request: Request) {
 
   try {
     db.transaction((tx) => {
-    const wanted = input.lenderName.toLowerCase();
-    let lender = tx
-      .select()
-      .from(lenders)
-      .all()
-      .find((l) => l.name.toLowerCase() === wanted);
-
-    if (!lender) {
-      const lenderId = nanoid();
-      tx.insert(lenders)
-        .values({
-          id: lenderId,
-          name: input.lenderName,
-          lenderType: input.interestCapitalised ? "second_tier" : "senior",
-          active: true,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
-      lender = tx.select().from(lenders).where(eq(lenders.id, lenderId)).get()!;
-    }
+      const lender = resolveLender(tx, input.lenderName, {
+        interestCapitalised: input.interestCapitalised,
+      });
+      const pool = resolvePool(tx, lender.id, input.poolName ?? input.lenderName, {
+        targetLvr: "0.65",
+        stressRate: "0.07",
+      });
 
     /**
      * Scoped to the entity as well as the lender. The check used to scan every
@@ -279,6 +276,7 @@ export async function POST(request: Request) {
         id: facilityId,
         entityId: input.entityId,
         lenderId: lender.id,
+        poolId: pool.id,
         facilityReference: input.facilityReference,
         facilityType: input.facilityType,
         facilityLimit: input.facilityLimit ?? null,
