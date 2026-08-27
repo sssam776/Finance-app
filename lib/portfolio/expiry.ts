@@ -19,10 +19,20 @@ export type Urgency = (typeof URGENCY_BANDS)[number];
 
 /** Upper bound of each band in days, ordered. Overdue is anything negative. */
 const URGENT_DAYS = 92; // about three months
-const SOON_DAYS = 365;
-const WATCH_DAYS = 548; // about eighteen months
+/**
+ * 366, not 365. A facility expiring on its twelve-month anniversary is 366
+ * days out whenever 29 February falls in between, which dropped it out of the
+ * figure headed "within twelve months" on exactly the date it matters.
+ */
+const SOON_DAYS = 366;
+const WATCH_DAYS = 549; // about eighteen months, on the same basis
 
 export interface FacilityEventLike {
+  /**
+   * The facility's own identifier. Aggregation keys on this rather than on the
+   * reference, which is unique only per lender (`loan_facilities_lender_reference_unique`).
+   */
+  facilityId: string;
   facilityReference: string;
   lenderName: string;
   entityShortCode: string;
@@ -81,7 +91,12 @@ export function expiryWatch(events: FacilityEventLike[], asOf: DateOnly): Expiry
       const remaining = daysUntil(event.eventDate, asOf);
       return { ...event, daysUntil: remaining, urgency: urgencyOf(remaining) };
     })
-    .sort((a, b) => a.daysUntil - b.daysUntil || a.facilityReference.localeCompare(b.facilityReference));
+    .sort(
+      (a, b) =>
+        a.daysUntil - b.daysUntil ||
+        a.lenderName.localeCompare(b.lenderName) ||
+        a.facilityReference.localeCompare(b.facilityReference)
+    );
 }
 
 export interface ExpiryTotal {
@@ -100,6 +115,13 @@ export interface ExpiryTotal {
  * A facility is counted once even when it carries several events inside the
  * horizon. Its balance is exposed once, and adding a re-fix to a term expiry
  * on the same loan would report twice the debt actually at risk.
+ *
+ * Identity is the facility id, not its reference. References are unique only
+ * per lender, and short ones are the norm, so keying on the reference made
+ * ASB "001" and BNZ "001" the same facility: whichever event sorted first won
+ * and the other balance was silently discarded. That understated the
+ * board-facing figure, in the same direction and for the same reason the
+ * dedupe exists to prevent overstating it.
  */
 export function valueWithin(rows: ExpiryWatchRow[], horizonDays: number): ExpiryTotal[] {
   const seen = new Set<string>();
@@ -107,8 +129,8 @@ export function valueWithin(rows: ExpiryWatchRow[], horizonDays: number): Expiry
 
   for (const row of rows) {
     if (row.daysUntil > horizonDays) continue;
-    if (seen.has(row.facilityReference)) continue;
-    seen.add(row.facilityReference);
+    if (seen.has(row.facilityId)) continue;
+    seen.add(row.facilityId);
 
     const running = totals.get(row.currency) ?? { amount: new Decimal(0), count: 0 };
     totals.set(row.currency, {

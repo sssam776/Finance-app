@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { entities, lenders, loanFacilities, facilityEvents } from "@/db/schema";
 import { requireSession, entityAccessFor } from "@/lib/session";
@@ -20,7 +20,24 @@ import { csvResponse, csvFilename } from "@/lib/csv/toCsv";
  * Normalising them on the way in is what makes the watch possible at all.
  */
 
-const MONEY = /^-?\d+(\.\d{1,2})?$/;
+/**
+ * Balances are unsigned. A drawn loan balance is never negative, and a signed
+ * pattern let an entry mistake reduce the reported twelve-month exposure
+ * rather than being refused: a facility posted at -4,000,000 netted off
+ * against a real one and understated the figure a board acts on.
+ *
+ * The length bound refuses an amount no property group holds, so a slipped
+ * keyboard cannot produce a total that is arithmetically fine and obviously
+ * absurd.
+ */
+const MONEY = /^\d{1,15}(\.\d{1,2})?$/;
+
+/**
+ * Thrown to roll the write back when the facility already exists. A sentinel
+ * rather than a bare Error so the catch can tell an expected duplicate from a
+ * genuine failure and rethrow the latter.
+ */
+class DuplicateFacility extends Error {}
 
 const facilitySchema = z.object({
   entityId: z.string().min(1),
@@ -29,9 +46,18 @@ const facilitySchema = z.object({
   facilityType: z
     .enum(["term_loan", "revolving_credit", "overdraft", "development", "other"])
     .default("term_loan"),
-  drawnAmount: z.string().regex(MONEY, "drawnAmount must be a decimal amount"),
-  facilityLimit: z.string().regex(MONEY, "facilityLimit must be a decimal amount").optional(),
-  currency: z.string().trim().length(3).default("NZD"),
+  drawnAmount: z.string().regex(MONEY, "drawnAmount must be a positive decimal amount"),
+  facilityLimit: z
+    .string()
+    .regex(MONEY, "facilityLimit must be a positive decimal amount")
+    .optional(),
+  // Letters only. A three-character free-for-all let "=1+" through, which then
+  // became its own bucket in the per-currency board total.
+  currency: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z]{3}$/, "currency must be a three-letter code, e.g. NZD")
+    .default("NZD"),
   /** Decimal fraction: 0.0785 for 7.85% p.a. */
   interestRate: z
     .string()
@@ -93,6 +119,7 @@ export async function GET(request: Request) {
       if (event.eventType === "drawdown") return [];
       return [
         {
+          facilityId: facility.id,
           facilityReference: facility.facilityReference,
           lenderName: allLenders.find((l) => l.id === facility.lenderId)?.name ?? "Unknown",
           entityShortCode:
@@ -178,50 +205,80 @@ export async function POST(request: Request) {
   }
 
   const now = nowUtcIso();
-
-  // Lenders are created by name on first use rather than managed separately.
-  // A lender is a name and a type; a screen to administer that would be a
-  // screen nobody visits twice.
-  let lender = db.select().from(lenders).where(eq(lenders.name, input.lenderName)).get();
-  if (!lender) {
-    const lenderId = nanoid();
-    db.insert(lenders)
-      .values({
-        id: lenderId,
-        name: input.lenderName,
-        lenderType: input.interestCapitalised ? "second_tier" : "senior",
-        active: true,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
-    lender = db.select().from(lenders).where(eq(lenders.id, lenderId)).get()!;
-  }
-
-  const existing = db
-    .select()
-    .from(loanFacilities)
-    .where(eq(loanFacilities.facilityReference, input.facilityReference))
-    .all()
-    .find((f) => f.lenderId === lender!.id);
-  if (existing) {
-    return NextResponse.json(
-      { error: `${input.lenderName} already has a facility referenced ${input.facilityReference}.` },
-      { status: 409 }
-    );
-  }
-
   const facilityId = nanoid();
 
-  // Facility and its events in one transaction. A facility written without its
-  // dates is invisible to the watch while looking present in the register,
-  // which is worse than a failed save.
-  db.transaction((tx) => {
+  /**
+   * Lender resolution, the duplicate check and every insert happen in one
+   * transaction.
+   *
+   * Lenders are created by name on first use rather than administered on their
+   * own screen. Previously that insert sat outside the transaction, so a
+   * facility that failed to save left an orphan lender behind, created into
+   * global state by an entity-scoped actor.
+   *
+   * The name match is case-insensitive. The unique index on `lenders.name` is
+   * BINARY, so "ASB" and "asb" were two lenders, which then defeated the
+   * facility uniqueness index entirely: the same real loan could be entered
+   * twice, appear twice in the register, and still be counted once in the
+   * board figure.
+   */
+  let conflict: string | null = null;
+
+  try {
+    db.transaction((tx) => {
+    const wanted = input.lenderName.toLowerCase();
+    let lender = tx
+      .select()
+      .from(lenders)
+      .all()
+      .find((l) => l.name.toLowerCase() === wanted);
+
+    if (!lender) {
+      const lenderId = nanoid();
+      tx.insert(lenders)
+        .values({
+          id: lenderId,
+          name: input.lenderName,
+          lenderType: input.interestCapitalised ? "second_tier" : "senior",
+          active: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      lender = tx.select().from(lenders).where(eq(lenders.id, lenderId)).get()!;
+    }
+
+    /**
+     * Scoped to the entity as well as the lender. The check used to scan every
+     * facility in the group, which told a caller that a reference existed
+     * inside an entity they have no access to, and refused a shape that is
+     * ordinary in a property group: two SPVs each holding an ASB facility
+     * referenced "1".
+     */
+    const existing = tx
+      .select()
+      .from(loanFacilities)
+      .where(
+        and(
+          eq(loanFacilities.entityId, input.entityId),
+          eq(loanFacilities.lenderId, lender.id),
+          eq(loanFacilities.facilityReference, input.facilityReference)
+        )
+      )
+      .get();
+
+    if (existing) {
+      conflict = `${entity.shortCode} already has a ${lender.name} facility referenced ${input.facilityReference}.`;
+      // Rolls the transaction back, so a lender created above for a request
+      // that turns out to be a duplicate is not left behind.
+      throw new DuplicateFacility();
+    }
+
     tx.insert(loanFacilities)
       .values({
         id: facilityId,
         entityId: input.entityId,
-        lenderId: lender!.id,
+        lenderId: lender.id,
         facilityReference: input.facilityReference,
         facilityType: input.facilityType,
         facilityLimit: input.facilityLimit ?? null,
@@ -255,8 +312,17 @@ export async function POST(request: Request) {
           updatedAt: now,
         })
         .run();
-    }
-  });
+      }
+    });
+  } catch (err) {
+    // A rolled-back duplicate is an expected outcome, not a failure. Anything
+    // else is a real error and is rethrown.
+    if (!(err instanceof DuplicateFacility)) throw err;
+  }
+
+  if (conflict) {
+    return NextResponse.json({ error: conflict }, { status: 409 });
+  }
 
   await recordAuditEvent({
     actorEmail: actor.email,

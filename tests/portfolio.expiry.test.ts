@@ -11,7 +11,8 @@ import {
 const AS_OF = "2026-08-26";
 
 function event(over: Partial<FacilityEventLike> = {}): FacilityEventLike {
-  return {
+  const base: FacilityEventLike = {
+    facilityId: "fac-1",
     facilityReference: "ASB-001",
     lenderName: "ASB",
     entityShortCode: "KAYO",
@@ -20,8 +21,13 @@ function event(over: Partial<FacilityEventLike> = {}): FacilityEventLike {
     amount: "1000000.00",
     currency: "NZD",
     confirmed: false,
-    ...over,
   };
+  // A caller that names a reference without an id means a distinct facility,
+  // which is what most of these cases are describing.
+  const derived = over.facilityReference && !over.facilityId
+    ? { facilityId: `fac-${over.facilityReference}` }
+    : {};
+  return { ...base, ...derived, ...over };
 }
 
 describe("daysUntil", () => {
@@ -58,9 +64,29 @@ describe("urgencyOf", () => {
     expect(urgencyOf(92)).toBe("urgent");
     expect(urgencyOf(93)).toBe("soon");
     expect(urgencyOf(365)).toBe("soon");
-    expect(urgencyOf(366)).toBe("watch");
-    expect(urgencyOf(548)).toBe("watch");
-    expect(urgencyOf(549)).toBe("distant");
+    expect(urgencyOf(366)).toBe("soon");
+    expect(urgencyOf(367)).toBe("watch");
+    expect(urgencyOf(549)).toBe("watch");
+    expect(urgencyOf(550)).toBe("distant");
+  });
+
+  it("keeps a twelve-month anniversary inside the twelve-month band across a leap day", () => {
+    /**
+     * 2027-08-26 to 2028-08-26 is 366 days because 29 February falls between.
+     * At a 365-day horizon the facility expiring on its own anniversary
+     * dropped out of the figure headed "within twelve months".
+     */
+    const anniversary = daysUntil("2028-08-26", "2027-08-26");
+    expect(anniversary).toBe(366);
+    expect(urgencyOf(anniversary)).toBe("soon");
+
+    const rows = expiryWatch(
+      [event({ eventDate: "2028-08-26", amount: "4000000.00" })],
+      "2027-08-26"
+    );
+    expect(valueWithin(rows, BOARD_HORIZON_DAYS)).toEqual([
+      { currency: "NZD", amount: "4000000.00", facilityCount: 1 },
+    ]);
   });
 });
 
@@ -131,13 +157,47 @@ describe("valueWithin", () => {
     // risk, which is the number a board would act on.
     const rows = expiryWatch(
       [
-        event({ facilityReference: "A", eventType: "rate_refix", eventDate: "2026-10-01", amount: "5000000.00" }),
-        event({ facilityReference: "A", eventType: "term_expiry", eventDate: "2026-12-01", amount: "5000000.00" }),
+        event({ facilityId: "f1", facilityReference: "A", eventType: "rate_refix", eventDate: "2026-10-01", amount: "5000000.00" }),
+        event({ facilityId: "f1", facilityReference: "A", eventType: "term_expiry", eventDate: "2026-12-01", amount: "5000000.00" }),
       ],
       AS_OF
     );
     expect(valueWithin(rows, BOARD_HORIZON_DAYS)).toEqual([
       { currency: "NZD", amount: "5000000.00", facilityCount: 1 },
+    ]);
+  });
+
+  it("keeps two lenders' identical references apart", () => {
+    /**
+     * References are unique only per lender, and short ones are the norm.
+     * Keying the dedupe on the reference made ASB "1" and BNZ "1" the same
+     * facility: whichever event sorted first won and the other balance was
+     * silently dropped, understating the board figure by the whole amount.
+     */
+    const rows = expiryWatch(
+      [
+        event({ facilityId: "asb-1", facilityReference: "1", lenderName: "ASB", eventDate: "2026-12-01", amount: "5000000.00" }),
+        event({ facilityId: "bnz-1", facilityReference: "1", lenderName: "BNZ", eventDate: "2026-11-01", amount: "7000000.00" }),
+      ],
+      AS_OF
+    );
+    expect(valueWithin(rows, BOARD_HORIZON_DAYS)).toEqual([
+      { currency: "NZD", amount: "12000000.00", facilityCount: 2 },
+    ]);
+  });
+
+  it("keeps two entities' identical references apart", () => {
+    // Two SPVs each holding an ASB facility referenced "1" is ordinary in a
+    // property group.
+    const rows = expiryWatch(
+      [
+        event({ facilityId: "kayo-1", facilityReference: "1", entityShortCode: "KAYO", amount: "2000000.00" }),
+        event({ facilityId: "kerrs-1", facilityReference: "1", entityShortCode: "KERRS", amount: "3000000.00" }),
+      ],
+      AS_OF
+    );
+    expect(valueWithin(rows, BOARD_HORIZON_DAYS)).toEqual([
+      { currency: "NZD", amount: "5000000.00", facilityCount: 2 },
     ]);
   });
 
