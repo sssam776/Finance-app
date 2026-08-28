@@ -125,7 +125,7 @@ export function PositionPanel({ data, asOf }: { data: PositionResponse | null; a
       </div>
 
       {data.positions.map((p) => (
-        <div key={p.poolId} className="rounded border border-slate-200 bg-white shadow-panel">
+        <div key={p.poolId} className="rounded bg-white shadow-panel">
           <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-100 px-4 py-3">
             <div className="font-medium text-slate-900">
               {p.lenderName}
@@ -205,7 +205,7 @@ export function PositionPanel({ data, asOf }: { data: PositionResponse | null; a
       ))}
 
       {(Number(data.split.developmentValue) > 0 || Number(data.split.heldForSaleValue) > 0) && (
-        <div className="rounded border border-slate-200 bg-white px-4 py-3 shadow-panel">
+        <div className="rounded bg-white px-4 py-3 shadow-panel">
           <div className="text-label uppercase text-slate-500">Value by purpose</div>
           {/* Development stock sits outside the book a senior lender tests.
               Blending the two produces a group figure that flatters the

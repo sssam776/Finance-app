@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ExportCsvLink } from "./ui";
+import { ExportCsvLink, PageHeading } from "./ui";
 
 interface Threshold {
   scope: "entity" | "group";
@@ -133,8 +133,11 @@ export default function CashPositionPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-slate-900">Cash Position</h1>
-          <p className="mt-1 text-sm text-slate-500">Available cash, loan facilities excluded</p>
+          {/* The shared primitive rather than a hand-rolled h1. Three screens
+              had copied these classes and one had already drifted. */}
+          <PageHeading title="Cash Position">
+            Available cash, loan facilities excluded.
+          </PageHeading>
           <div className="mt-3">
             {/* The export carries the evidence columns with the figures, so a
                 variance taken into a spreadsheet keeps its source. */}
@@ -178,7 +181,7 @@ export default function CashPositionPage() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded border border-slate-200 bg-white shadow-panel">
+      <div className="overflow-x-auto rounded bg-white shadow-panel">
         <table className="min-w-full text-sm">
           {/* Explicit widths: left to itself the browser gave the text columns
               the space and squeezed the dates until they broke mid-value. */}
@@ -220,7 +223,7 @@ export default function CashPositionPage() {
       </div>
 
       {isAdmin && (
-        <form onSubmit={saveThreshold} className="space-y-3 rounded border border-slate-200 bg-white p-5 shadow-panel">
+        <form onSubmit={saveThreshold} className="space-y-3 rounded bg-white p-5 shadow-panel">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Group variance threshold</h2>
             <p className="mt-0.5 max-w-prose text-xs text-slate-500">

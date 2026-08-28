@@ -144,7 +144,7 @@ export default function XeroPage() {
       </PageHeading>
 
       {apps.length > 0 && (
-        <div className="space-y-2 rounded border border-slate-200 bg-white px-4 py-3 text-sm shadow-panel">
+        <div className="space-y-2 rounded bg-white px-4 py-3 text-sm shadow-panel">
           {/* Capacity is per registration, so each app reports its own. A single
               figure taken from one app misrepresents every other one. */}
           {apps.map((app) => (

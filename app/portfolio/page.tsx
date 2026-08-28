@@ -15,6 +15,7 @@ import {
   Notice,
   EmptyRow,
   ExportCsvLink,
+  SectionHeading,
 } from "../ui";
 import { PositionPanel, type PositionResponse } from "./PositionPanel";
 
@@ -236,10 +237,13 @@ export default function PortfolioPage() {
 
       <PositionPanel data={position} asOf={position?.asOf ?? ""} />
 
-      <h2 className="pt-2 text-lg font-semibold text-slate-900">Facility expiry watch</h2>
+      <SectionHeading title="Facility expiry watch">
+        Rate re-fixes and term expiries, soonest first. A facility that rolled over without anyone
+        deciding to roll it is the avoidable version of a funding problem.
+      </SectionHeading>
 
       {data && data.withinTwelveMonths.length > 0 && (
-        <div className="rounded border border-slate-200 bg-white px-4 py-3 shadow-panel">
+        <div className="rounded bg-white px-4 py-3 shadow-panel">
           <div className="text-label uppercase text-slate-500">Maturing or re-fixing within 12 months</div>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-6 gap-y-2">
             {data.withinTwelveMonths.map((t) => (

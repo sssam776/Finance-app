@@ -51,7 +51,7 @@ export default function LoginPage() {
 
       <form
         onSubmit={handleSubmit}
-        className="mt-6 space-y-4 rounded border border-slate-200 bg-white p-6 shadow-panel"
+        className="mt-6 space-y-4 rounded bg-white p-6 shadow-panel"
       >
         <Field label="Email">
           <Input
