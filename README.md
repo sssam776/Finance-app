@@ -111,9 +111,15 @@ The honest summary, with the full breakdown in
   tested, but there is no API, no screen and no data in them.
 - **Not started:** the CFO dashboard itself, the sell-and-redeploy model, and
   the cash-flow forecast.
-- **Never run against real data:** no Xero organisation has been connected, so
-  two report-parsing assumptions remain unconfirmed. Both degrade to no-match
-  rather than to a wrong number.
+- **Running against real data:** two Ramwall organisations are connected and
+  syncing. Connecting them exposed six defects in paths that only a live
+  organisation could execute, and settled both outstanding report-parsing
+  assumptions. `docs/phase-status.md` lists what was found.
+- **Read only, verified:** the granted token carries four accounting scopes and
+  every one ends in `.read`. No write call exists in the codebase, and a test
+  fails if a scope is added ahead of the feature that needs it.
+- **Cash Position is empty until a bank statement is imported.** It compares a
+  statement against Xero; the Xero half is live, the statement half is not.
 
 The app runs on local SQLite and disk rather than Cloudflare D1/R2 — see
 `docs/architecture-decision-records/ADR-002-cloudflare-xero-sdk.md` for the

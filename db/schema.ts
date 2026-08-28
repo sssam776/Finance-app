@@ -996,7 +996,16 @@ export const loanFacilities = sqliteTable(
     ...timestamps(),
   },
   (t) => ({
-    facilityReferenceUnique: uniqueIndex("loan_facilities_lender_reference_unique").on(
+    /**
+     * Scoped to the entity as well as the lender.
+     *
+     * Keyed on lender and reference alone, this forbade a shape that is
+     * ordinary in a property group: two SPVs each holding an ASB facility
+     * referenced "1". A reference is only ever unique within one borrower's
+     * arrangements with one lender.
+     */
+    facilityReferenceUnique: uniqueIndex("loan_facilities_entity_lender_reference_unique").on(
+      t.entityId,
       t.lenderId,
       t.facilityReference
     ),

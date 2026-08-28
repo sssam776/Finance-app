@@ -17,6 +17,23 @@ export function PageHeading({ title, children }: { title: string; children?: Rea
   );
 }
 
+/**
+ * The second level, for a division within a page.
+ *
+ * Exists because three screens had hand-rolled their own and drifted: one used
+ * `text-lg`, which is not a step in the type scale at all. The scale carries
+ * hierarchy through weight rather than size, so a heading that reaches for a
+ * larger font is working around the layout instead of using it.
+ */
+export function SectionHeading({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div className="border-b border-slate-200 pb-2">
+      <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+      {children && <p className="mt-1 max-w-prose text-sm text-slate-500">{children}</p>}
+    </div>
+  );
+}
+
 export function Panel({
   title,
   description,
@@ -26,8 +43,14 @@ export function Panel({
   description?: ReactNode;
   children: ReactNode;
 }) {
+  /**
+   * Fill and elevation, no border. The system provisions one shadow for panels
+   * and separately forbids border, shadow and fill on the same element.
+   * Carrying all three gave every card two competing edges, which is most of
+   * what made the app read as assembled rather than designed.
+   */
   return (
-    <section className="rounded border border-slate-200 bg-white p-5 shadow-panel">
+    <section className="rounded bg-white p-5 shadow-panel">
       {title && (
         <div className="mb-4">
           <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
@@ -42,7 +65,7 @@ export function Panel({
 /** Table wrapper. The scroll container lives here so no page forgets it. */
 export function TableFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded border border-slate-200 bg-white shadow-panel">
+    <div className="overflow-x-auto rounded bg-white shadow-panel">
       <table className="min-w-full text-sm">{children}</table>
     </div>
   );
@@ -92,6 +115,39 @@ export function Button({
     <button className={`${base} ${look} ${className ?? ""}`} {...props}>
       {children}
     </button>
+  );
+}
+
+/**
+ * A plain anchor rather than a button with a fetch. The browser's own download
+ * handling carries the filename from Content-Disposition, streams without
+ * holding the file in memory, and keeps working when the response is an error
+ * page the user can then read.
+ *
+ * `disabled` is expressed by rendering a span, because an anchor has no
+ * disabled state and one styled to look inert is still clickable.
+ */
+export function ExportCsvLink({
+  href,
+  disabled,
+  children = "Export CSV",
+}: {
+  href: string;
+  disabled?: boolean;
+  children?: ReactNode;
+}) {
+  const base = "rounded border px-3 py-1.5 text-sm font-medium";
+  if (disabled) {
+    return (
+      <span className={`${base} border-slate-200 bg-white text-slate-400`} aria-disabled="true">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <a href={href} download className={`${base} border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}>
+      {children}
+    </a>
   );
 }
 

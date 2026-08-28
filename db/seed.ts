@@ -86,7 +86,7 @@ async function seed() {
         purpose: "read_core",
         tier: "Starter",
         connectionLimit: 5,
-        scopeProfile: "read_core_v2",
+        scopeProfile: "read_core_v3",
         redirectUri:
           process.env.XERO_REDIRECT_URI ?? "http://localhost:3000/api/xero/oauth/callback",
         clientIdSecretRef: app.clientIdSecretRef,

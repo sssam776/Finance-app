@@ -1,0 +1,2 @@
+DROP INDEX `loan_facilities_lender_reference_unique`;--> statement-breakpoint
+CREATE UNIQUE INDEX `loan_facilities_entity_lender_reference_unique` ON `loan_facilities` (`entity_id`,`lender_id`,`facility_reference`);

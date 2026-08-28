@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "/", label: "Cash Position" },
   { href: "/variance", label: "P&L Movement" },
   { href: "/reconciliation", label: "Balance Sheet" },
+  { href: "/portfolio", label: "Debt & Facilities" },
   { href: "/entities", label: "Entities" },
   { href: "/imports", label: "Bank Imports" },
   { href: "/xero", label: "Xero Connections" },

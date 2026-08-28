@@ -171,6 +171,20 @@ export async function getAuthenticatedClient(
   }
 
   try {
+    /**
+     * `refreshToken()` reaches straight for `this.openIdClient` with no guard,
+     * unlike `buildConsentUrl()` and `apiCallback()`, which both lazily call
+     * `initialize()` first (XeroClient.js:83, :99, :133). A client built here
+     * has never been through either of those paths, so its `openIdClient` is
+     * undefined and the refresh throws a TypeError rather than failing as an
+     * auth error.
+     *
+     * Initialised only on the refresh branch. It performs OIDC discovery
+     * against identity.xero.com, and ordinary API calls authenticate with the
+     * stored access token and never touch it.
+     */
+    await client.initialize();
+
     const refreshed = await client.refreshToken();
     const now = nowUtcIso();
     const encrypted = encryptTokenSet(JSON.stringify(refreshed), CURRENT_KEY_VERSION);

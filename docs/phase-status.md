@@ -26,7 +26,7 @@ as one below.
 | 3 | CFO portfolio dashboard | **Schema only** — engines built, nothing rendered |
 | 4 | Property sell / redeploy | **Not started** |
 | 5 | Cash-flow forecast | **Not started** |
-| 6 | Xero / automated sources | **Partial** — built early, never connected to a real organisation |
+| 6 | Xero / automated sources | **Built** — connected to live organisations and syncing |
 
 Phase 6 being underway before phases 3–5 is a deliberate consequence of build
 order: the Xero modules were specified and built against the earlier master
@@ -157,34 +157,67 @@ to connect directly to the Cash Position snapshot.
 
 ## Phase 6 — Xero / automated sources
 
-**Status: Partial.** More is built here than the phase order implies, because
-this work predates the rebuild spec. None of it has run against a real Xero
-organisation.
+**Status: Built and running against live organisations.** More is built here
+than the phase order implies, because this work predates the rebuild spec.
+
+Two real Ramwall organisations are connected and syncing. Everything below has
+now executed against live data rather than against fixtures.
 
 | Requirement | Status |
 |---|---|
-| OAuth 2.0 authorisation | Built — tokens encrypted at rest (AES-256-GCM) |
-| Read-only scope enforcement | Built — a test fails if any write scope is added |
-| Connection capacity gate | Built — checked before consent, not after |
-| Production compliance gate | Built — `lib/xero/compliance.ts` |
-| Connection health and staleness | Built |
-| Paged, rate-limit-aware fetching | Built — honours `Retry-After`, retries count against the call cap |
-| P&L movement (Module C) | Built — favourable/adverse, materiality ranking, commentary |
-| Balance-sheet reconciliation (Module D) | Built — refuses to mark unsupported balances reconciled |
-| Live connection | **Never made** |
+| OAuth 2.0 authorisation | Verified live, tokens encrypted at rest (AES-256-GCM) |
+| Read-only scope enforcement | Verified against the granted token: every accounting scope ends in `.read` |
+| Connection capacity gate | Built, checked before consent rather than after |
+| Production compliance gate | Built, `lib/xero/compliance.ts` |
+| Connection health and staleness | Verified live |
+| Paged, rate-limit-aware fetching | Built, honours `Retry-After`, retries count against the call cap |
+| Chart of accounts sync | Verified live |
+| P&L movement (Module C) | Verified live, favourable/adverse correct on real figures |
+| Balance-sheet reconciliation (Module D) | Verified live, trial balance parsed and balanced |
+| Live connection | **Made 2026-08-26** |
 
-**Two open risks.** Two report-parsing assumptions are unconfirmed against real
-Xero responses; `scripts/spike-xero-shapes.ts` settles both once an organisation
-is connected. Both degrade to no-match rather than to a wrong number. Separately,
-the token-refresh compare-and-swap in `lib/xero/gateway.ts` is not a true lock —
-two concurrent refreshes can still race, which is low risk with one user and
-real with several.
+### What the live connection found
 
-**Capacity constraint.** The registered app is Starter tier with a limit of five
-connections, against eight entities. Spec 3.3 forbids adding a second
-same-purpose Starter app as a free-tier workaround, and the compliance gate
-enforces that, so covering all eight is a commercial decision (Core tier) rather
-than a code change.
+Nothing in this phase had ever run end to end, and connecting exposed six
+defects that no amount of unit testing would have reached. They are recorded
+here because the pattern matters more than the individual bugs: every one sat
+in a path that only a real organisation could execute.
+
+- The connect button returned a cross-origin `303` to a `fetch` call, which
+  cannot follow one. It had never worked from a browser.
+- The scope profile requested Xero's broad scopes. Apps created from
+  2 March 2026 are granted only the granular set, so authorisation failed at
+  the consent screen with `invalid_scope`.
+- The callback built its client without the state, so `apiCallback` had nothing
+  to verify against and refused every callback.
+- The callback had no error handling at all, so failures surfaced as a bare 500
+  with the reason visible only in the server console.
+- `refreshToken()` in the SDK has no lazy-initialise guard, unlike the methods
+  either side of it, so every token refresh would have thrown roughly half an
+  hour after the first connection.
+- The P&L sync sent no `fromDate`, on the assumption Xero derives the window.
+  It does not, and rejects the request.
+
+Two parser assumptions were also settled by `scripts/spike-xero-shapes.ts`
+against a real Bank Summary:
+
+- **Closing balance is the last cell: holds.**
+- **Account names match report rows: does not hold.** Names covered 14 of 22
+  accounts. The row's account GUID is authoritative, and the parser was reading
+  it from the wrong attribute (`account` on the name cell, where Xero writes
+  `accountID`), so it was null on every row and matching silently fell back to
+  the name. Fixed; all synced accounts now carry their GUID.
+
+**Still open.** The token-refresh compare-and-swap in `lib/xero/gateway.ts` is
+not a true lock: two concurrent refreshes can still race. Low risk with one
+user, real with several.
+
+**Capacity constraint.** Each Starter tier app allows five connections. Two
+development registrations exist, giving ten slots against eight entities. Note
+that spec 3.3 treats a second same-purpose Starter app as a free-tier
+workaround rather than a supported capacity strategy, and the production
+compliance gate refuses it, so covering all eight in production remains a tier
+decision rather than a code change.
 
 ---
 
@@ -200,20 +233,24 @@ Built and in use across every phase:
 | Audit log with actor identity taken from the session | Built |
 | Money as Decimal throughout, never floating point | Built |
 | Evidence drill-through on every figure | Built for bank and Xero sources |
+| Entity confirmation, recorded with a note and an actor | Built |
 | Design system | Built; not yet aligned to the Ramwall brand palette |
 
 ---
 
 ## What is needed from Ramwall
 
-1. **A Xero organisation to connect**, and a decision on the five-connection
-   limit against eight entities.
-2. **Confirmation of which entities have their own Xero organisation.** All
-   eight are `unverified`.
+1. **The remaining Xero organisations.** Two are connected and confirmed. Six
+   entities have none: RAMWALL_2010, RAMWALL_DEV, VIKAT, HEBCOHG, CHH_TRUST and
+   WALLSON. Eight connection slots are free.
+2. **One real ASB and one real BNZ export.** This is now the single biggest
+   gap: Cash Position compares a bank statement against Xero, and without a
+   statement the screen is empty. The Xero half is live and working.
 3. **The Master Finance Schedule workbook**, to populate the Phase 1 registers.
    Nothing in the portfolio layer can display until it exists.
-4. **One real ASB and one real BNZ export**, to confirm the parsers against
-   genuine files.
-5. **Materiality thresholds**, rather than the placeholder defaults loaded.
-6. **A decision on bank-account classification** — which accounts are
+4. **Materiality thresholds**, rather than the placeholder defaults loaded.
+5. **A decision on bank-account classification** — which accounts are
    statutory, restricted, or approved as deployable.
+6. **A hosting decision.** Running locally is fine for a demonstration. For the
+   client to use this themselves it needs a persistent disk and HTTPS; see
+   `deploying.md`.

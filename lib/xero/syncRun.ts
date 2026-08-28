@@ -83,13 +83,60 @@ export async function completeSyncRun(input: {
   });
 }
 
+/**
+ * The most specific description available of why a sync failed.
+ *
+ * `xero-node` rejects with a plain object carrying the HTTP response rather
+ * than with an `Error`, so an `instanceof Error` check discards every upstream
+ * failure and records "Unknown sync error" instead. That message is written to
+ * the sync run, shown on screen, and is all anyone has to work from later.
+ *
+ * Xero returns its reason in one of several body shapes depending on which
+ * validation rejected the request, so each is tried before falling back to the
+ * status code.
+ */
+function describeSyncError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+
+  if (error && typeof error === "object") {
+    type XeroErrorBody = {
+      Detail?: string;
+      Message?: string;
+      Title?: string;
+      Elements?: { ValidationErrors?: { Message?: string }[] }[];
+    };
+    const candidate = error as {
+      // The SDK nests the parsed body inside `response`; some paths also put a
+      // copy at the top level, so both are read.
+      response?: { statusCode?: number; statusMessage?: string; body?: XeroErrorBody };
+      body?: XeroErrorBody;
+      statusCode?: number;
+      message?: string;
+    };
+
+    const body = candidate.response?.body ?? candidate.body;
+    const validation = body?.Elements?.[0]?.ValidationErrors?.[0]?.Message;
+    const detail = body?.Detail ?? body?.Message ?? body?.Title ?? validation;
+    const status = candidate.response?.statusCode ?? candidate.statusCode;
+
+    if (detail && status) return `Xero returned ${status}: ${detail}`;
+    if (detail) return String(detail);
+    if (status) return `Xero returned HTTP ${status}${candidate.response?.statusMessage ? ` ${candidate.response.statusMessage}` : ""}`;
+    if (candidate.message) return String(candidate.message);
+  }
+
+  if (typeof error === "string" && error) return error;
+
+  return "Unknown sync error";
+}
+
 export async function failSyncRun(input: {
   syncRunId: SyncRunId;
   route: ResolvedXeroRoute;
   actorEmail: string;
   error: unknown;
 }): Promise<string> {
-  const message = input.error instanceof Error ? input.error.message : "Unknown sync error";
+  const message = describeSyncError(input.error);
   const now = nowUtcIso();
 
   db.update(syncRuns)

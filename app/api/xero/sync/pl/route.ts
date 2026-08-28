@@ -13,6 +13,7 @@ import {
   headersOf,
 } from "@/lib/xero/reports";
 import { nowUtcIso, isValidDateOnly } from "@/lib/dates";
+import { periodKeyOf, addMonths, periodRange } from "@/lib/periods";
 import { periodKeyFromColumnLabel } from "@/lib/variance/columnLabel";
 import { requireSession, entityAccessFor } from "@/lib/session";
 import { canAccessEntity } from "@/lib/entityAccess";
@@ -77,12 +78,25 @@ export async function POST(request: Request) {
   try {
     const { client, tenantId } = await getAuthenticatedClient(route);
 
+    /**
+     * fromDate is sent explicitly. Leaving it undefined and expecting Xero to
+     * derive the window from toDate and the period count was an assumption,
+     * and a live request rejects it:
+     *
+     *   400 ValidationException
+     *   "The fromDate parameter must be before the toDate parameter."
+     *
+     * `periods` counts the months the report covers including the one ending
+     * at periodEnd, so the window opens periods-1 months earlier.
+     */
+    const fromDate = periodRange(addMonths(periodKeyOf(periodEnd), -(periods - 1))).start;
+
     // Argument order matters and is easy to get wrong: there are FOUR tracking
     // parameters between the timeframe and standardLayout, not two. Passing
     // standardLayout early sends `true` as a tracking option id.
     const response = await client.accountingApi.getReportProfitAndLoss(
       tenantId,
-      undefined, // fromDate: Xero derives it from toDate and the period count
+      fromDate,
       periodEnd,
       periods,
       "MONTH",

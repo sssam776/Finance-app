@@ -217,6 +217,37 @@ export function parseProfitAndLoss(report: ReportWithRows): PlAccountRow[] {
     });
 }
 
+/**
+ * The account GUID from a Bank Summary row, wherever Xero put it.
+ *
+ * A live response carries it under two different attribute ids in the same
+ * row: the name cell uses `accountID`, while the amount cells use `account`.
+ *
+ *   cell[0] "ASB Term Loan (639-92-003)"  attributes: accountID=88a6b7a1-...
+ *   cell[2] "2387.68"                     attributes: account=88a6b7a1-...
+ *
+ * Reading only `account` from cell[0] therefore found nothing and returned
+ * null for every row, which silently demoted matching to the account name.
+ * Names covered 14 of 22 accounts on the first real organisation, and they are
+ * user-editable in Xero, so the failure is both large and invisible.
+ *
+ * Scans every cell and accepts either spelling. Case-insensitive because the
+ * two ids already differ in case and a third variant is cheaper to absorb here
+ * than to discover in production.
+ */
+function bankSummaryAccountId(row: { cells?: { attributes?: { id?: string; value?: string }[] }[] }):
+  | string
+  | null {
+  for (const cell of row.cells ?? []) {
+    for (const attribute of cell.attributes ?? []) {
+      if (/^account(id)?$/i.test(String(attribute.id ?? "")) && attribute.value) {
+        return String(attribute.value);
+      }
+    }
+  }
+  return null;
+}
+
 export function parseBankSummaryClosingBalances(report: ReportWithRows): BankSummaryBalance[] {
   const results: BankSummaryBalance[] = [];
   const topLevelRows = report.reports?.[0]?.rows ?? [];
@@ -236,8 +267,7 @@ export function parseBankSummaryClosingBalances(report: ReportWithRows): BankSum
         results.push({
           accountName: String(accountName),
           closingBalance: String(closingBalance),
-          xeroAccountId:
-            (row.cells[0]?.attributes ?? []).find((a) => String(a.id) === "account")?.value ?? null,
+          xeroAccountId: bankSummaryAccountId(row),
         });
       }
     }

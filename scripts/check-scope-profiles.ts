@@ -13,7 +13,7 @@ import { RETIRED_SCOPE_PROFILES } from "../lib/xero/scopeProfiles";
 import { nowUtcIso } from "../lib/dates";
 
 const FIX = process.argv.includes("--fix");
-const TARGET = "read_core_v2";
+const TARGET = "read_core_v3";
 
 const apps = db
   .select({

@@ -13,6 +13,7 @@ import {
 } from "@/lib/periods";
 import { requireSession, entityAccessFor } from "@/lib/session";
 import { canAccessEntity } from "@/lib/entityAccess";
+import { csvResponse, csvFilename } from "@/lib/csv/toCsv";
 
 /**
  * VAR-001 and VAR-003: what moved between two periods, ranked by materiality.
@@ -181,6 +182,45 @@ export async function GET(request: Request) {
   });
 
   const syncRun = db.select().from(syncRuns).where(eq(syncRuns.id, snapshot.syncRunId)).get();
+
+  /**
+   * The export serialises this same result rather than running a second query.
+   * A separate route would be a second implementation of the movement
+   * calculation, and the file a controller takes into a board meeting would be
+   * free to disagree with the screen it was approved on.
+   */
+  if (url.searchParams.get("format") === "csv") {
+    return csvResponse(
+      csvFilename(["pl-movement", entity.shortCode, period, `vs-${comparePeriod}`]),
+      [
+        "Account code",
+        "Account",
+        "Section",
+        "Currency",
+        `Actual ${period}`,
+        `Comparative ${comparePeriod}`,
+        "Movement",
+        "Movement %",
+        "Direction",
+        "Exception",
+      ],
+      summary.rows.map((r) => [
+        r.accountCode,
+        r.accountName,
+        r.sectionKind,
+        r.currency,
+        r.actual,
+        r.comparative,
+        r.movement,
+        r.percent,
+        // Spelled out rather than left as a boolean. "false" under a heading
+        // of Direction does not read as adverse to anyone opening this later,
+        // and an empty cell correctly says the question did not apply.
+        r.favourable === null ? "" : r.favourable ? "favourable" : "adverse",
+        r.isException ? "yes" : "no",
+      ])
+    );
+  }
 
   return NextResponse.json({
     entityId,

@@ -14,6 +14,7 @@ import {
   StatusPill,
   Notice,
   EmptyRow,
+  ExportCsvLink,
 } from "../ui";
 
 interface Entity {
@@ -180,32 +181,38 @@ export default function ReconciliationPage() {
           </Field>
         </div>
 
-        {isAdmin && (
-          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() =>
-                act(
-                  "/api/xero/sync/trial-balance",
-                  { entityId, periodEnd },
-                  "Trial balance synced."
-                )
-              }
-            >
-              Sync trial balance
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() =>
-                act("/api/reconciliation", { entityId, periodEnd }, "Workpapers prepared.")
-              }
-            >
-              Prepare workpapers
-            </Button>
-          </div>
-        )}
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+          {isAdmin && (
+            <>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() =>
+                  act(
+                    "/api/xero/sync/trial-balance",
+                    { entityId, periodEnd },
+                    "Trial balance synced."
+                  )
+                }
+              >
+                Sync trial balance
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() =>
+                  act("/api/reconciliation", { entityId, periodEnd }, "Workpapers prepared.")
+                }
+              >
+                Prepare workpapers
+              </Button>
+            </>
+          )}
+          <ExportCsvLink
+            href={`/api/reconciliation?entityId=${encodeURIComponent(entityId)}&periodEnd=${encodeURIComponent(periodEnd)}&format=csv`}
+            disabled={!data?.available}
+          />
+        </div>
         {message && (
           <div className="mt-3">
             <Notice tone={message.ok ? "ok" : "error"}>{message.text}</Notice>

@@ -21,6 +21,7 @@ import { Money } from "@/lib/money";
 import { recordAuditEvent } from "@/lib/audit";
 import { requireSession, entityAccessFor } from "@/lib/session";
 import { canAccessEntity } from "@/lib/entityAccess";
+import { csvResponse, csvFilename } from "@/lib/csv/toCsv";
 
 /**
  * BS-001..005: balance-sheet workpapers for one entity and period.
@@ -109,6 +110,45 @@ export async function GET(request: Request) {
       : null,
     difference: w.difference ? Money.of(w.difference, w.currency).toFixedString(2) : null,
   }));
+
+  /**
+   * Serialises the same presented rows rather than re-querying. The rounding
+   * applied just above is part of the answer, and an export that skipped it
+   * would show differences the screen does not.
+   */
+  if (url.searchParams.get("format") === "csv") {
+    // Looked up only on this branch. The short code is what makes a folder of
+    // these files readable later, and the JSON path has no use for it.
+    const entity = db.select().from(entities).where(eq(entities.id, entityId)).get();
+
+    return csvResponse(
+      csvFilename(["balance-sheet", entity?.shortCode ?? entityId, periodEnd]),
+      [
+        "Account code",
+        "Account",
+        "Currency",
+        "Trial balance",
+        "Substantiated",
+        "Difference",
+        "Substantiation source",
+        "Status",
+        "Material",
+        "Note",
+      ],
+      presented.map((w) => [
+        w.accountCode,
+        w.accountName,
+        w.currency,
+        w.tbAmount,
+        w.substantiatedAmount,
+        w.difference,
+        w.substantiationType,
+        w.status,
+        w.isMaterial ? "yes" : "no",
+        w.note,
+      ])
+    );
+  }
 
   return NextResponse.json({
     entityId,
