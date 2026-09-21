@@ -12,6 +12,7 @@ interface Me {
 
 const NAV_ITEMS = [
   { href: "/", label: "Cash Position" },
+  { href: "/cash-flow", label: "Cash Flow" },
   { href: "/variance", label: "P&L Movement" },
   { href: "/reconciliation", label: "Balance Sheet" },
   { href: "/portfolio", label: "Debt & Facilities" },
