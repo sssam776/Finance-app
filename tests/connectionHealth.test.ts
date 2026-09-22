@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   connectionHealth,
+  healthLabel,
   STALE_AFTER_HOURS,
   SEVERELY_STALE_AFTER_HOURS,
 } from "../lib/xero/connectionHealth";
@@ -90,5 +91,68 @@ describe("connectionHealth", () => {
   it("flags capacity and compliance blocks distinctly", () => {
     expect(connectionHealth(conn({ status: "capacity_blocked" }), NOW).message).toMatch(/slots/);
     expect(connectionHealth(conn({ status: "compliance_blocked" }), NOW).message).toMatch(/approved/);
+  });
+});
+
+
+describe("healthLabel", () => {
+  /**
+   * The regression this exists for. The pill takes its colour from the health
+   * level and used to take its word from the raw status, so a connection whose
+   * OAuth was fine but whose data was weeks old rendered the word "healthy" in
+   * the error tone, directly above a message saying the figures were stale.
+   *
+   * Driven through connectionHealth rather than a hand-picked level, because a
+   * hand-picked level would still pass if the two signals stopped lining up.
+   */
+  it("never shows a reassuring word for a severely stale connection", () => {
+    const connection = conn({ lastSuccessfulCallAt: hoursAgo(665) });
+    const health = connectionHealth(connection, NOW);
+
+    expect(health.level).toBe("error");
+    expect(connection.status).toBe("healthy");
+    expect(healthLabel(health.level, connection.status)).toBe("needs attention");
+  });
+
+  it("downgrades a reassuring word to stale while the level is only a warning", () => {
+    const connection = conn({ lastSuccessfulCallAt: hoursAgo(STALE_AFTER_HOURS) });
+    const health = connectionHealth(connection, NOW);
+
+    expect(health.level).toBe("warning");
+    expect(healthLabel(health.level, connection.status)).toBe("stale");
+  });
+
+  it("shows the raw status once the level agrees with it", () => {
+    expect(healthLabel("ok", "healthy")).toBe("healthy");
+    expect(healthLabel("ok", "refresh_due")).toBe("refresh due");
+  });
+
+  /**
+   * A status that is already a problem word says more than a generic label, and
+   * cannot contradict the tone it is shown in.
+   */
+  it("keeps a problem status verbatim rather than flattening it", () => {
+    expect(healthLabel("error", "disconnected")).toBe("disconnected");
+    expect(healthLabel("error", "sync_error")).toBe("sync error");
+    expect(healthLabel("warning", "rate_limited")).toBe("rate limited");
+  });
+
+  it("matches the tone for every status connectionHealth can produce", () => {
+    const statuses = [
+      "healthy", "refresh_due", "pending_authorisation", "reauthorisation_required",
+      "permission_missing", "rate_limited", "sync_error", "disconnected",
+      "disabled", "capacity_blocked", "compliance_blocked",
+    ];
+    for (const status of statuses) {
+      for (const hours of [1, STALE_AFTER_HOURS, SEVERELY_STALE_AFTER_HOURS + 600]) {
+        const connection = conn({ status, lastSuccessfulCallAt: hoursAgo(hours) });
+        const label = healthLabel(connectionHealth(connection, NOW).level, status);
+        // The whole point: a warning or error pill can never read as reassuring.
+        if (connectionHealth(connection, NOW).level !== "ok") {
+          expect(label).not.toBe("healthy");
+          expect(label).not.toBe("refresh due");
+        }
+      }
+    }
   });
 });
