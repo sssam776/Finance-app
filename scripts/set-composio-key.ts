@@ -1,15 +1,11 @@
 /**
- * Stores a Composio API key in .env.local, after checking it actually works.
+ * Stores the Composio Connect consumer key in .env.local, after checking it works.
  *
  * Written as a script rather than an instruction to edit the file by hand for
  * two reasons. The key never has to be pasted anywhere it would be recorded —
  * not into a chat, not into a command line that lands in shell history — and a
  * key that does not work is rejected here rather than becoming a 401 later from
  * somewhere that looks like a bug in the app.
- *
- * It also reports how many Xero organisations the key can see, which is the
- * thing actually worth knowing: a valid key pointed at the wrong Composio
- * project authenticates perfectly and returns nothing.
  *
  * .env.local is gitignored. Nothing here is ever committed.
  *
@@ -22,16 +18,13 @@ import { join } from "node:path";
 import { upsertEnvVar } from "../lib/envFile";
 
 const ENV_PATH = join(process.cwd(), ".env.local");
-const VAR = "COMPOSIO_API_KEY";
-const BASE = "https://backend.composio.dev";
+const VAR = "COMPOSIO_CONSUMER_KEY";
+const MCP_URL = "https://connect.composio.dev/mcp";
 
 /** Reads one line without echoing it, so the key never appears on screen. */
 function promptHidden(question: string): Promise<string> {
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    // readline writes each keystroke back to the terminal. Suppressing that is
-    // the whole point: a key echoed into a scrollback buffer is a key on screen
-    // for everyone behind you and in every screen recording afterwards.
     const target = rl as unknown as { _writeToOutput: (s: string) => void };
     const original = target._writeToOutput.bind(rl);
     target._writeToOutput = (s: string) => {
@@ -46,44 +39,56 @@ function promptHidden(question: string): Promise<string> {
   });
 }
 
-async function check(key: string): Promise<{ ok: true; xeroConnections: number } | { ok: false; why: string }> {
+type Check = { ok: true; tools: number } | { ok: false; why: string };
+
+/**
+ * Composio Connect authenticates consumer keys on x-consumer-api-key against
+ * the MCP endpoint. The project REST API uses x-api-key and a different key
+ * type entirely; sending a ck_ key there answers "Invalid API key", which reads
+ * as a bad key rather than as the wrong door. That cost an hour once.
+ */
+async function check(key: string): Promise<Check> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}/api/v3/connected_accounts?toolkit_slugs=xero&limit=50`, {
-      headers: { "x-api-key": key },
+    res = await fetch(MCP_URL, {
+      method: "POST",
+      headers: {
+        "x-consumer-api-key": key,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      signal: AbortSignal.timeout(45_000),
     });
   } catch (err) {
-    return { ok: false, why: `Could not reach Composio: ${err instanceof Error ? err.message : err}` };
+    const detail = err instanceof Error ? err.message : String(err);
+    return { ok: false, why: "Could not reach Composio: " + detail };
   }
 
-  if (res.status === 401) {
-    // Composio echoes the key back masked, which is a useful check that what
-    // arrived is what was typed. Shown as-is; it is already redacted.
-    const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-    return { ok: false, why: body?.error?.message ?? "Composio rejected the key." };
-  }
-  if (!res.ok) {
-    return { ok: false, why: `Composio returned ${res.status}.` };
-  }
+  if (!res.ok) return { ok: false, why: "Composio returned " + res.status + ". Check the key is current." };
 
-  const body = (await res.json()) as { items?: unknown[]; data?: unknown[] };
-  const items = body.items ?? body.data ?? [];
-  return { ok: true, xeroConnections: Array.isArray(items) ? items.length : 0 };
+  const text = await res.text();
+  const frame = text.split(/\r?\n/).filter((l) => l.startsWith("data: ")).pop()?.slice(6);
+  if (!frame) return { ok: false, why: "Composio returned no data frame." };
+
+  const reply = JSON.parse(frame) as { result?: { tools?: unknown[] }; error?: { message?: string } };
+  if (reply.error) return { ok: false, why: reply.error.message ?? "Composio rejected the key." };
+  return { ok: true, tools: reply.result?.tools?.length ?? 0 };
 }
 
 function writeKey(key: string): "updated" | "added" {
   const existing = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, "utf8") : "";
-  const already = /^s*COMPOSIO_API_KEY=/m.test(existing);
+  const already = new RegExp("^\s*" + VAR + "=", "m").test(existing);
   writeFileSync(
     ENV_PATH,
-    upsertEnvVar(existing, VAR, key, "Composio holds the Xero connections for every entity.")
+    upsertEnvVar(existing, VAR, key, "Composio Connect holds the client's Xero organisations.")
   );
   return already ? "updated" : "added";
 }
 
 async function main() {
-  console.log("\nComposio API key");
-  console.log("Dashboard -> Settings -> API Keys. Input is hidden.\n");
+  console.log("\nComposio Connect consumer key");
+  console.log("Composio -> Connect -> Sessions & API Key (the ck_ one). Input is hidden.\n");
 
   const key = await promptHidden("Paste the key: ");
   if (!key) {
@@ -95,24 +100,16 @@ async function main() {
   const result = await check(key);
 
   if (!result.ok) {
-    console.error(`rejected.\n\n${result.why}\n`);
+    console.error("rejected.\n\n" + result.why + "\n");
     console.error(".env.local was not touched.");
     process.exit(1);
   }
 
   console.log("accepted.");
   const what = writeKey(key);
-  console.log(`\n${VAR} ${what} in .env.local`);
-  console.log(`Xero organisations visible to this key: ${result.xeroConnections}`);
-
-  if (result.xeroConnections === 0) {
-    // Authenticating and seeing nothing is the quiet failure worth naming: the
-    // key is fine, it just belongs to a project with no Xero connections in it.
-    console.log("\nThe key works but this project has no Xero connections.");
-    console.log("Check you copied it from the same Composio project the organisations are connected in.");
-  }
-
-  console.log("\nRestart the dev server to pick it up.");
+  console.log("\n" + VAR + " " + what + " in .env.local");
+  console.log("Tools exposed to this key: " + result.tools);
+  console.log("\nNext: npx tsx scripts/composio-inventory.ts\n");
 }
 
 main().catch((err) => {
