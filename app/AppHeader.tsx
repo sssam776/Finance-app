@@ -72,7 +72,7 @@ export function AppHeader() {
           </nav>
 
           {me && (
-            <div className="flex items-center gap-3 text-sm sm:border-l sm:border-slate-200 sm:pl-5">
+            <div className="flex items-center gap-3 text-sm">
               <Link href="/account" className="rounded leading-tight hover:opacity-80">
                 <span className="text-slate-700">{me.displayName}</span>
                 <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
