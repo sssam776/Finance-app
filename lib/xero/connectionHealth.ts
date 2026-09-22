@@ -159,3 +159,33 @@ export function connectionHealth(
     needsAttention: false,
   };
 }
+
+/**
+ * Status words that read as reassuring on their own.
+ *
+ * `connectionHealth` already consumes `status` — it is one input among several,
+ * so the two can disagree. A connection whose OAuth is fine but whose last
+ * successful sync was 665 hours ago carries `status: "healthy"` alongside
+ * `level: "error"`.
+ */
+const REASSURING_STATUSES: ReadonlySet<string> = new Set(["healthy", "refresh_due"]);
+
+/**
+ * The word to show on a connection's status pill.
+ *
+ * The pill's colour comes from `level`, so its word has to come from the same
+ * verdict or the two contradict each other: the Xero screen was rendering the
+ * word "healthy" in the error tone, directly above a message saying the figures
+ * were out of date. Colour and word disagreeing is worse than either alone,
+ * because whichever one the reader trusts, the other was telling the truth.
+ *
+ * A status that is already a problem word is shown verbatim — "disconnected" in
+ * the error tone agrees with itself and says more than a generic label could.
+ * Only a reassuring word under a warning or error tone is replaced.
+ */
+export function healthLabel(level: HealthLevel, status: string): string {
+  if (level === "ok" || !REASSURING_STATUSES.has(status)) {
+    return status.replace(/_/g, " ");
+  }
+  return level === "error" ? "needs attention" : "stale";
+}

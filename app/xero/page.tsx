@@ -12,6 +12,7 @@ import {
   Notice,
   EmptyRow,
 } from "../ui";
+import { healthLabel } from "@/lib/xero/connectionHealth";
 
 interface ConnectionHealth {
   level: "ok" | "warning" | "error";
@@ -232,7 +233,7 @@ export default function XeroPage() {
                           : "healthy"
                     }
                   >
-                    {c.status}
+                    {healthLabel(c.health.level, c.status)}
                   </StatusPill>
                   {c.health.message && (
                     <div className="mt-1 max-w-xs text-xs text-slate-500">{c.health.message}</div>
